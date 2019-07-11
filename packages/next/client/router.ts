@@ -16,7 +16,7 @@ type SingletonRouterBase = {
 
 export { Router }
 
-export type PublicRouterInstance = BaseRouter &
+export type NextRouter = BaseRouter &
   Pick<
     Router,
     'push' | 'replace' | 'reload' | 'back' | 'prefetch' | 'beforePopState'
@@ -24,7 +24,7 @@ export type PublicRouterInstance = BaseRouter &
     events: typeof Router['events']
   }
 
-export type SingletonRouter = SingletonRouterBase & PublicRouterInstance
+export type SingletonRouter = SingletonRouterBase & NextRouter
 
 const singletonRouter: SingletonRouterBase = {
   router: null, // holds the actual router instance
@@ -146,7 +146,7 @@ export const createRouter = (...args: RouterArgs) => {
 }
 
 // This function is used to create the `withRouter` router instance
-export function makePublicRouterInstance(router: Router): PublicRouterInstance {
+export function makePublicRouterInstance(router: Router): NextRouter {
   const _router = router as any
   const instance = {} as any
 
