@@ -1,21 +1,13 @@
 {
-  "name": "with-docker",
-  "version": "1.0.0",
+  "private": true,
   "scripts": {
-    "dev": "next",
+    "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "build-docker": "docker build -t next-app .",
-    "build-docker-multistage": "docker build -t next-app -f ./Dockerfile.multistage .",
-    "run-docker": "docker run --rm -it -p 3000:3000 -e 'API_URL=https://example.com' next-app"
+    "start": "next start -p ${PORT:=3000}"
   },
   "dependencies": {
     "next": "latest",
-    "react": "^16.7.0",
-    "react-dom": "^16.7.0"
-  },
-  "devDependencies": {
-    "isomorphic-unfetch": "^3.0.0"
-  },
-  "license": "ISC"
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  }
 }

@@ -1,7 +1,8 @@
 /* global window */
 import React from 'react'
-import Router, { NextRouter } from '../next-server/lib/router/router'
-import { RouterContext } from '../next-server/lib/router-context'
+import Router from '../shared/lib/router/router'
+import type { NextRouter } from '../shared/lib/router/router'
+import { RouterContext } from '../shared/lib/router-context'
 
 type ClassArguments<T> = T extends new (...args: infer U) => any ? U : any
 
@@ -13,7 +14,9 @@ type SingletonRouterBase = {
   ready(cb: () => any): void
 }
 
-export { Router, NextRouter }
+export { Router }
+
+export type { NextRouter }
 
 export type SingletonRouter = SingletonRouterBase & NextRouter
 
@@ -36,6 +39,14 @@ const urlPropertyFields = [
   'asPath',
   'components',
   'isFallback',
+  'basePath',
+  'locale',
+  'locales',
+  'defaultLocale',
+  'isReady',
+  'isPreview',
+  'isLocaleDomain',
+  'domainLocales',
 ]
 const routerEvents = [
   'routeChangeStart',
@@ -44,7 +55,9 @@ const routerEvents = [
   'routeChangeError',
   'hashChangeStart',
   'hashChangeComplete',
-]
+] as const
+export type RouterEvent = typeof routerEvents[number]
+
 const coreMethodFields = [
   'push',
   'replace',
@@ -61,8 +74,8 @@ Object.defineProperty(singletonRouter, 'events', {
   },
 })
 
-urlPropertyFields.forEach(field => {
-  // Here we need to use Object.defineProperty because, we need to return
+urlPropertyFields.forEach((field: string) => {
+  // Here we need to use Object.defineProperty because we need to return
   // the property assigned to the actual router
   // The value might get changed as we change routes and this is the
   // proper way to access it
@@ -74,7 +87,7 @@ urlPropertyFields.forEach(field => {
   })
 })
 
-coreMethodFields.forEach(field => {
+coreMethodFields.forEach((field: string) => {
   // We don't really know the types here, so we add them later instead
   ;(singletonRouter as any)[field] = (...args: any[]) => {
     const router = getRouter() as any
@@ -82,7 +95,7 @@ coreMethodFields.forEach(field => {
   }
 })
 
-routerEvents.forEach(event => {
+routerEvents.forEach((event) => {
   singletonRouter.ready(() => {
     Router.events.on(event, (...args) => {
       const eventField = `on${event.charAt(0).toUpperCase()}${event.substring(
@@ -93,9 +106,7 @@ routerEvents.forEach(event => {
         try {
           _singletonRouter[eventField](...args)
         } catch (err) {
-          // tslint:disable-next-line:no-console
           console.error(`Error when running the Router event: ${eventField}`)
-          // tslint:disable-next-line:no-console
           console.error(`${err.message}\n${err.stack}`)
         }
       }
@@ -103,11 +114,11 @@ routerEvents.forEach(event => {
   })
 })
 
-function getRouter() {
+function getRouter(): Router {
   if (!singletonRouter.router) {
     const message =
       'No router instance found.\n' +
-      'You should only use "next/router" inside the client side of your app.\n'
+      'You should only use "next/router" on the client side of your app.\n'
     throw new Error(message)
   }
   return singletonRouter.router
@@ -119,7 +130,7 @@ export default singletonRouter as SingletonRouter
 // Reexport the withRoute HOC
 export { default as withRouter } from './with-router'
 
-export function useRouter() {
+export function useRouter(): NextRouter {
   return React.useContext(RouterContext)
 }
 
@@ -129,10 +140,10 @@ export function useRouter() {
 
 // Create a router and assign it as the singleton instance.
 // This is used in client side when we are initilizing the app.
-// This should **not** use inside the server.
-export const createRouter = (...args: RouterArgs) => {
+// This should **not** be used inside the server.
+export function createRouter(...args: RouterArgs): Router {
   singletonRouter.router = new Router(...args)
-  singletonRouter.readyCallbacks.forEach(cb => cb())
+  singletonRouter.readyCallbacks.forEach((cb) => cb())
   singletonRouter.readyCallbacks = []
 
   return singletonRouter.router
@@ -145,7 +156,10 @@ export function makePublicRouterInstance(router: Router): NextRouter {
 
   for (const property of urlPropertyFields) {
     if (typeof _router[property] === 'object') {
-      instance[property] = Object.assign({}, _router[property]) // makes sure query is not stateful
+      instance[property] = Object.assign(
+        Array.isArray(_router[property]) ? [] : {},
+        _router[property]
+      ) // makes sure query is not stateful
       continue
     }
 
@@ -155,7 +169,7 @@ export function makePublicRouterInstance(router: Router): NextRouter {
   // Events is a static property on the router, the router doesn't have to be initialized to use it
   instance.events = Router.events
 
-  coreMethodFields.forEach(field => {
+  coreMethodFields.forEach((field) => {
     instance[field] = (...args: any[]) => {
       return _router[field](...args)
     }

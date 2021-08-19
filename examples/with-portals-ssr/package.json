@@ -1,4 +1,5 @@
 {
+  "private": true,
   "scripts": {
     "dev": "next",
     "build": "next build",
@@ -7,7 +8,7 @@
   "dependencies": {
     "@jesstelford/react-portal-universal": "1.0.0",
     "next": "latest",
-    "react": "^16.8.0",
-    "react-dom": "^16.8.0"
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
   }
 }

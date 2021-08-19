@@ -1,42 +1,65 @@
 # XState example
 
-This example shows how to integrate XState in Next.js. For more info about XState you can visit [here](https://xstate.js.org/).
+This example shows how to integrate XState in Next.js. [Learn more about XState](https://xstate.js.org/).
+
+## Preview
+
+Preview the example live on [StackBlitz](http://stackblitz.com/):
+
+[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/vercel/next.js/tree/canary/examples/with-xstate)
 
 ## Deploy your own
 
-Deploy the example using [ZEIT Now](https://zeit.co/now):
+Deploy the example using [Vercel](https://vercel.com?utm_source=github&utm_medium=readme&utm_campaign=next-example):
 
-[![Deploy with ZEIT Now](https://zeit.co/button)](https://zeit.co/import/project?template=https://github.com/zeit/next.js/tree/canary/examples/with-xstate)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/git/external?repository-url=https://github.com/vercel/next.js/tree/canary/examples/with-xstate&project-name=with-xstate&repository-name=with-xstate)
 
 ## How to use
 
-### Using `create-next-app`
-
-Execute [`create-next-app`](https://github.com/zeit/next.js/tree/canary/packages/create-next-app) with [npm](https://docs.npmjs.com/cli/init) or [Yarn](https://yarnpkg.com/lang/en/docs/cli/create/) to bootstrap the example:
+Execute [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app) with [npm](https://docs.npmjs.com/cli/init) or [Yarn](https://yarnpkg.com/lang/en/docs/cli/create/) to bootstrap the example:
 
 ```bash
-npm init next-app --example with-xstate with-xstate-app
+npx create-next-app --example with-xstate with-xstate-app
 # or
 yarn create next-app --example with-xstate with-xstate-app
 ```
 
-### Download manually
+### Inspect your machines using `@xstate/inspect`
 
-Download the example:
+You could use the inspection tools for XState: ([`@xstate/inspect`](https://xstate.js.org/docs/packages/xstate-inspect)) to debug and visualize your machines in development mode.
 
-```bash
-curl https://codeload.github.com/zeit/next.js/tar.gz/canary | tar -xz --strip=2 next.js-canary/examples/with-xstate
-cd with-xstate
-```
-
-Install it and run:
+#### Install @xstate/inspect
 
 ```bash
-npm install
-npm run dev
+npm install @xstate/inspect
 # or
-yarn
-yarn dev
+yarn add @xstate/inspect
 ```
 
-Deploy it to the cloud with [ZEIT Now](https://zeit.co/import?filter=next.js&utm_source=github&utm_medium=readme&utm_campaign=next-example) ([Documentation](https://nextjs.org/docs/deployment)).
+#### Import it at the top of the project
+
+```js
+import { inspect } from '@xstate/inspect'
+```
+
+#### Use the inspect method
+
+Note that for Next.js projects, you should ensure that the inspector code only runs on the client, rather than the server:
+
+```js
+if (typeof window !== 'undefined') {
+  inspect({
+    /* options */
+  })
+}
+```
+
+### Deploy to Now
+
+Deploy it to the cloud with [Vercel](https://vercel.com/new?utm_source=github&utm_medium=readme&utm_campaign=next-example) ([Documentation](https://nextjs.org/docs/deployment)).
+
+## References
+
+- [xstate](https://github.com/davidkpiano/xstate) repository
+- [@xstate/react](https://xstate.js.org/docs/packages/xstate-react) documentation
+- [@xstate/inspect](https://xstate.js.org/docs/packages/xstate-inspect/#faqs) usage with Next.JS

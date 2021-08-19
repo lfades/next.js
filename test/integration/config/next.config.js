@@ -3,11 +3,12 @@ const withSass = require('@zeit/next-sass')
 const path = require('path')
 module.exports = withCSS(
   withSass({
+    // @zeit/next-sass is not supported with webpack 5
+    webpack5: false,
     onDemandEntries: {
       // Make sure entries are not getting disposed.
       maxInactiveAge: 1000 * 60 * 60,
     },
-    experimental: { css: true },
     poweredByHeader: false,
     cssModules: true,
     serverRuntimeConfig: {
@@ -19,7 +20,16 @@ module.exports = withCSS(
     env: {
       customVar: 'hello',
     },
-    webpack(config, { buildId, webpack }) {
+    webpack(config, { dev, buildId, webpack }) {
+      if (dev) {
+        if (config.bail !== false) {
+          throw new Error('Wrong bail value for development!')
+        }
+      } else {
+        if (config.bail !== true) {
+          throw new Error('Wrong bail value for production!')
+        }
+      }
       // When next-css is `npm link`ed we have to solve loaders from the project root
       const nextLocation = path.join(
         require.resolve('next/package.json'),

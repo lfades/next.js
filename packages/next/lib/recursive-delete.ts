@@ -1,16 +1,12 @@
-import fs from 'fs'
+import { Dirent, promises } from 'fs'
 import { join } from 'path'
 import { promisify } from 'util'
 
-const readdir = promisify(fs.readdir)
-const stat = promisify(fs.stat)
-const rmdir = promisify(fs.rmdir)
-const unlink = promisify(fs.unlink)
 const sleep = promisify(setTimeout)
 
 const unlinkFile = async (p: string, t = 1): Promise<void> => {
   try {
-    await unlink(p)
+    await promises.unlink(p)
   } catch (e) {
     if (
       (e.code === 'EBUSY' ||
@@ -45,7 +41,7 @@ export async function recursiveDelete(
 ): Promise<void> {
   let result
   try {
-    result = await readdir(dir)
+    result = await promises.readdir(dir, { withFileTypes: true })
   } catch (e) {
     if (e.code === 'ENOENT') {
       return
@@ -54,19 +50,21 @@ export async function recursiveDelete(
   }
 
   await Promise.all(
-    result.map(async (part: string) => {
-      const absolutePath = join(dir, part)
-      const pathStat = await stat(absolutePath).catch(e => {
-        if (e.code !== 'ENOENT') throw e
-      })
-      if (!pathStat) {
-        return
+    result.map(async (part: Dirent) => {
+      const absolutePath = join(dir, part.name)
+
+      // readdir does not follow symbolic links
+      // if part is a symbolic link, follow it using stat
+      let isDirectory = part.isDirectory()
+      if (part.isSymbolicLink()) {
+        const stats = await promises.stat(absolutePath)
+        isDirectory = stats.isDirectory()
       }
 
-      const pp = join(previousPath, part)
-      if (pathStat.isDirectory() && (!exclude || !exclude.test(pp))) {
+      const pp = join(previousPath, part.name)
+      if (isDirectory && (!exclude || !exclude.test(pp))) {
         await recursiveDelete(absolutePath, exclude, pp)
-        return rmdir(absolutePath)
+        return promises.rmdir(absolutePath)
       }
 
       if (!exclude || !exclude.test(pp)) {

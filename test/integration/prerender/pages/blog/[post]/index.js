@@ -1,6 +1,7 @@
 import React from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
+import 'firebase/firestore'
 
 export async function getStaticPaths() {
   return {
@@ -20,7 +21,7 @@ let counter = 0
 
 export async function getStaticProps({ params }) {
   if (params.post === 'post-10') {
-    await new Promise(resolve => {
+    await new Promise((resolve) => {
       setTimeout(() => resolve(), 1000)
     })
   }
@@ -30,7 +31,7 @@ export async function getStaticProps({ params }) {
   }
 
   if (params.post === 'post-999') {
-    if (++counter < 3) {
+    if (++counter < 6) {
       throw new Error('try again..')
     }
   }

@@ -1,9 +1,9 @@
 /* eslint-env jest */
-/* global jasmine */
+
 import { join } from 'path'
 import { runNextCommand, findPort, File } from 'next-test-utils'
 
-jasmine.DEFAULT_TIMEOUT_INTERVAL = 1000 * 30
+jest.setTimeout(1000 * 30)
 const configFile = new File(join(__dirname, '../next.config.js'))
 
 describe('Promise in next config', () => {
@@ -24,7 +24,7 @@ describe('Promise in next config', () => {
     )
 
     expect(stderr).toMatch(
-      /Error: > Promise returned in next config\. https:\/\/err\.sh\/zeit\/next\.js\/promise-in-next-config/
+      /Error: > Promise returned in next config\. https:\/\//
     )
   })
 
@@ -45,8 +45,6 @@ describe('Promise in next config', () => {
       { stderr: true }
     )
 
-    expect(stderr).toMatch(
-      /> Promise returned in next config\. https:\/\/err\.sh\/zeit\/next\.js\/promise-in-next-config/
-    )
+    expect(stderr).toMatch(/> Promise returned in next config\. https:\/\//)
   })
 })

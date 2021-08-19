@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button, Wizard } from '@patternfly/react-core'
+import { CogIcon } from '@patternfly/react-icons'
 
 const steps = [
   { name: 'Step 1', component: <p>Step 1</p> },
@@ -9,7 +10,7 @@ const steps = [
   { name: 'Review', component: <p>Review Step</p>, nextButtonText: 'Finish' },
 ]
 
-export default () => {
+export default function Home() {
   const [isOpen, setIsOpen] = useState(false)
   return (
     <>
@@ -17,6 +18,7 @@ export default () => {
         variant="primary"
         onClick={() => setIsOpen(true)}
         style={{ margin: 20 }}
+        icon={<CogIcon />}
       >
         Show Wizard
       </Button>

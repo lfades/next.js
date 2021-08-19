@@ -1,5 +1,5 @@
 /* eslint-env jest */
-/* global jasmine */
+
 import webdriver from 'next-webdriver'
 import { join } from 'path'
 import {
@@ -10,13 +10,13 @@ import {
   renderViaHTTP,
 } from 'next-test-utils'
 
-jasmine.DEFAULT_TIMEOUT_INTERVAL = 1000 * 60 * 5
+jest.setTimeout(1000 * 60 * 5)
 
 let appDir = join(__dirname, '../')
 let server
 let appPort
 
-describe('future.excludeDefaultMomentLocales', () => {
+describe('excludeDefaultMomentLocales', () => {
   beforeAll(async () => {
     await nextBuild(appDir)
     const app = nextServer({

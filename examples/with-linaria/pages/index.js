@@ -1,6 +1,6 @@
-import React from 'react'
 import Head from 'next/head'
 import { styled } from 'linaria/react'
+import { css } from 'linaria'
 
 const Box = styled.div`
   margin-top: 40px;
@@ -21,13 +21,17 @@ const Box = styled.div`
   }
 `
 
-export default () => {
+const anotherClass = css`
+  color: blue;
+`
+
+export default function Home() {
   return (
-    <React.Fragment>
+    <>
       <Head>
         <title>With Linaria</title>
       </Head>
-      <Box>Zero runtime CSS in JS</Box>
-    </React.Fragment>
+      <Box className={anotherClass}>Zero runtime CSS in JS</Box>
+    </>
   )
 }

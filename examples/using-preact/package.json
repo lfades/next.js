@@ -1,20 +1,18 @@
 {
-  "name": "using-preact",
-  "version": "1.0.0",
+  "private": true,
   "scripts": {
-    "dev": "node server.js",
+    "dev": "next",
     "build": "next build",
-    "start": "NODE_ENV=production node server.js"
+    "start": "next start"
   },
+  "devDependencies": {},
   "dependencies": {
-    "module-alias": "2.2.2",
-    "next": "latest",
-    "preact": "10.2.1",
-    "preact-render-to-string": "5.1.4"
-  },
-  "license": "ISC",
-  "devDependencies": {
-    "react": "16.10.2",
-    "react-dom": "16.10.2"
+    "next": "^10.0.0",
+    "next-plugin-preact": "^3.0.3",
+    "preact": "^10.5.5",
+    "preact-render-to-string": "^5.1.11",
+    "react": "npm:@preact/compat",
+    "react-dom": "npm:@preact/compat",
+    "react-ssr-prepass": "npm:preact-ssr-prepass@^1.1.2"
   }
 }

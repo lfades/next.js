@@ -1,13 +1,9 @@
 import connect from './error-overlay/hot-dev-client'
 
-export default ({ assetPrefix }) => {
-  const options = {
-    path: `${assetPrefix}/_next/webpack-hmr`,
-  }
+export default () => {
+  const devClient = connect()
 
-  const devClient = connect(options)
-
-  devClient.subscribeToHmrEvent(obj => {
+  devClient.subscribeToHmrEvent((obj) => {
     if (obj.action === 'reloadPage') {
       return window.location.reload()
     }

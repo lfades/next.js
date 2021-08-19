@@ -1,255 +1,164 @@
-// Copy of https://github.com/webpack/webpack/blob/master/lib/debug/ProfilingPlugin.js
-// License:
-/*
-Copyright JS Foundation and other contributors
+import { webpack, isWebpack5 } from 'next/dist/compiled/webpack/webpack'
+import { trace, Span } from '../../../telemetry/trace'
 
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-'Software'), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
-// Includes fix https://github.com/webpack/webpack/pull/9566
-// Includes support for custom tracer that can capture across multiple builds
 const pluginName = 'ProfilingPlugin'
+export const spans = new WeakMap<any, Span>()
+
+function getNormalModuleLoaderHook(compilation: any) {
+  if (isWebpack5) {
+    // @ts-ignore TODO: Remove ignore when webpack 5 is stable
+    return webpack.NormalModule.getCompilationHooks(compilation).loader
+  }
+
+  return compilation.hooks.normalModuleLoader
+}
 
 export class ProfilingPlugin {
-  tracer: any
-  /**
-   * @param {ProfilingPluginOptions=} opts options object
-   */
-  constructor(opts: { tracer: any }) {
-    this.tracer = opts.tracer
+  compiler: any
+  runWebpackSpan: Span | undefined
+
+  constructor({ runWebpackSpan }: { runWebpackSpan: Span | undefined }) {
+    this.runWebpackSpan = runWebpackSpan
+  }
+  apply(compiler: any) {
+    this.traceTopLevelHooks(compiler)
+    this.traceCompilationHooks(compiler)
+    this.compiler = compiler
   }
 
-  apply(compiler: any) {
-    const tracer = this.tracer
-
-    // Compiler Hooks
-    Object.keys(compiler.hooks).forEach(hookName => {
-      compiler.hooks[hookName].intercept(
-        makeInterceptorFor('Compiler', tracer)(hookName)
-      )
+  traceHookPair(
+    spanName: string,
+    startHook: any,
+    stopHook: any,
+    {
+      parentSpan,
+      attrs,
+      onSetSpan,
+    }: {
+      parentSpan?: () => Span | undefined
+      attrs?: any
+      onSetSpan?: (span: Span) => void
+    } = {}
+  ) {
+    let span: Span | undefined
+    startHook.tap(pluginName, () => {
+      span = trace(spanName, parentSpan?.()?.id, attrs ? attrs() : attrs)
+      onSetSpan?.(span)
     })
-
-    Object.keys(compiler.resolverFactory.hooks).forEach(hookName => {
-      compiler.resolverFactory.hooks[hookName].intercept(
-        makeInterceptorFor('Resolver', tracer)(hookName)
-      )
+    stopHook.tap(pluginName, () => {
+      // `stopHook` may be triggered when `startHook` has not in cases
+      // where `stopHook` is used as the terminating event for more
+      // than one pair of hooks.
+      if (!span) {
+        return
+      }
+      span.stop()
     })
+  }
 
-    compiler.hooks.compilation.tap(
-      pluginName,
-      (
-        compilation: any,
-        { normalModuleFactory, contextModuleFactory }: any
-      ) => {
-        interceptAllHooksFor(compilation, tracer, 'Compilation')
-        interceptAllHooksFor(
-          normalModuleFactory,
-          tracer,
-          'Normal Module Factory'
-        )
-        interceptAllHooksFor(
-          contextModuleFactory,
-          tracer,
-          'Context Module Factory'
-        )
-        interceptAllParserHooks(normalModuleFactory, tracer)
-        interceptTemplateInstancesFrom(compilation, tracer)
+  traceTopLevelHooks(compiler: any) {
+    this.traceHookPair(
+      'webpack-compilation',
+      isWebpack5 ? compiler.hooks.beforeCompile : compiler.hooks.compile,
+      isWebpack5 ? compiler.hooks.afterCompile : compiler.hooks.done,
+      {
+        parentSpan: () => this.runWebpackSpan,
+        attrs: () => ({ name: compiler.name }),
+        onSetSpan: (span) => spans.set(compiler, span),
       }
     )
-  }
-}
 
-const interceptTemplateInstancesFrom = (compilation: any, tracer: any) => {
-  const {
-    mainTemplate,
-    chunkTemplate,
-    hotUpdateChunkTemplate,
-    moduleTemplates,
-  } = compilation
-
-  const { javascript, webassembly } = moduleTemplates
-  ;[
-    {
-      instance: mainTemplate,
-      name: 'MainTemplate',
-    },
-    {
-      instance: chunkTemplate,
-      name: 'ChunkTemplate',
-    },
-    {
-      instance: hotUpdateChunkTemplate,
-      name: 'HotUpdateChunkTemplate',
-    },
-    {
-      instance: javascript,
-      name: 'JavaScriptModuleTemplate',
-    },
-    {
-      instance: webassembly,
-      name: 'WebAssemblyModuleTemplate',
-    },
-  ].forEach(templateObject => {
-    Object.keys(templateObject.instance.hooks).forEach(hookName => {
-      templateObject.instance.hooks[hookName].intercept(
-        makeInterceptorFor(templateObject.name, tracer)(hookName)
+    if (compiler.options.mode === 'development') {
+      this.traceHookPair(
+        'webpack-invalidated',
+        compiler.hooks.invalid,
+        compiler.hooks.done,
+        { attrs: () => ({ name: compiler.name }) }
       )
-    })
-  })
-}
-
-const interceptAllHooksFor = (instance: any, tracer: any, logLabel: any) => {
-  if (Reflect.has(instance, 'hooks')) {
-    Object.keys(instance.hooks).forEach(hookName => {
-      instance.hooks[hookName].intercept(
-        makeInterceptorFor(logLabel, tracer)(hookName)
-      )
-    })
-  }
-}
-
-const interceptAllParserHooks = (moduleFactory: any, tracer: any) => {
-  const moduleTypes = [
-    'javascript/auto',
-    'javascript/dynamic',
-    'javascript/esm',
-    'json',
-    'webassembly/experimental',
-  ]
-
-  moduleTypes.forEach(moduleType => {
-    moduleFactory.hooks.parser
-      .for(moduleType)
-      .tap('ProfilingPlugin', (parser: any, parserOpts: any) => {
-        interceptAllHooksFor(parser, tracer, 'Parser')
-      })
-  })
-}
-
-const makeInterceptorFor = (instance: any, tracer: any) => (hookName: any) => ({
-  register: ({ name, type, context, fn }: any) => {
-    const newFn = makeNewProfiledTapFn(hookName, tracer, {
-      name,
-      type,
-      fn,
-    })
-    return {
-      name,
-      type,
-      context,
-      fn: newFn,
     }
-  },
-})
+  }
 
-// TODO improve typing
-/** @typedef {(...args: TODO[]) => void | Promise<TODO>} PluginFunction */
+  traceCompilationHooks(compiler: any) {
+    this.traceHookPair(
+      'webpack-emit',
+      compiler.hooks.emit,
+      compiler.hooks.afterEmit,
+      { parentSpan: () => this.runWebpackSpan }
+    )
 
-/**
- * @param {string} hookName Name of the hook to profile.
- * @param {Trace} tracer The trace object.
- * @param {object} options Options for the profiled fn.
- * @param {string} options.name Plugin name
- * @param {string} options.type Plugin type (sync | async | promise)
- * @param {PluginFunction} options.fn Plugin function
- * @returns {PluginFunction} Chainable hooked function.
- */
-const makeNewProfiledTapFn = (
-  hookName: any,
-  tracer: any,
-  { name, type, fn }: any
-) => {
-  const defaultCategory = ['blink.user_timing']
-
-  switch (type) {
-    case 'promise':
-      return (...args: any) => {
-        const id = ++tracer.counter
-        tracer.trace.begin({
-          name,
-          id,
-          cat: defaultCategory,
-        })
-        const promise = /** @type {Promise<*>} */ fn(...args)
-        return promise.then((r: any) => {
-          tracer.trace.end({
-            name,
-            id,
-            cat: defaultCategory,
-          })
-          return r
-        })
-      }
-    case 'async':
-      return (...args: any) => {
-        const id = ++tracer.counter
-        tracer.trace.begin({
-          name,
-          id,
-          cat: defaultCategory,
-        })
-        const callback = args.pop()
-        /* eslint-disable */
-        fn(...args, (...r: any) => {
-          tracer.trace.end({
-            name,
-            id,
-            cat: defaultCategory,
-          })
-          callback(...r)
-        })
-        /* eslint-enable */
-      }
-    case 'sync':
-      return (...args: any) => {
-        const id = ++tracer.counter
-        // Do not instrument ourself due to the CPU
-        // profile needing to be the last event in the trace.
-        if (name === pluginName) {
-          return fn(...args)
+    compiler.hooks.compilation.tap(pluginName, (compilation: any) => {
+      compilation.hooks.buildModule.tap(pluginName, (module: any) => {
+        const compilerSpan = spans.get(compiler)
+        if (!compilerSpan) {
+          return
         }
 
-        tracer.trace.begin({
-          name,
-          id,
-          cat: defaultCategory,
-        })
-        let r
-        try {
-          r = fn(...args)
-        } catch (error) {
-          tracer.trace.end({
-            name,
-            id,
-            cat: defaultCategory,
-          })
-          throw error
+        const moduleType = (() => {
+          if (!module.userRequest) {
+            return ''
+          }
+
+          return module.userRequest.split('.').pop()
+        })()
+
+        const issuerModule = compilation?.moduleGraph?.getIssuer(module)
+
+        const span = trace(
+          `build-module${moduleType ? `-${moduleType}` : ''}`,
+          issuerModule ? spans.get(issuerModule)?.id : compilerSpan.id
+        )
+        span.setAttribute('name', module.userRequest)
+        spans.set(module, span)
+      })
+
+      getNormalModuleLoaderHook(compilation).tap(
+        pluginName,
+        (loaderContext: any, module: any) => {
+          const moduleSpan = spans.get(module)
+          loaderContext.currentTraceSpan = moduleSpan
         }
-        tracer.trace.end({
-          name,
-          id,
-          cat: defaultCategory,
-        })
-        return r
-      }
-    default:
-      break
+      )
+
+      compilation.hooks.succeedModule.tap(pluginName, (module: any) => {
+        spans.get(module)?.stop()
+      })
+
+      this.traceHookPair(
+        'webpack-compilation-chunk-graph',
+        compilation.hooks.beforeChunks,
+        compilation.hooks.afterChunks,
+        { parentSpan: () => this.runWebpackSpan }
+      )
+      this.traceHookPair(
+        'webpack-compilation-optimize',
+        compilation.hooks.optimize,
+        compilation.hooks.reviveModules,
+        { parentSpan: () => this.runWebpackSpan }
+      )
+      this.traceHookPair(
+        'webpack-compilation-optimize-modules',
+        compilation.hooks.optimizeModules,
+        compilation.hooks.afterOptimizeModules,
+        { parentSpan: () => this.runWebpackSpan }
+      )
+      this.traceHookPair(
+        'webpack-compilation-optimize-chunks',
+        compilation.hooks.optimizeChunks,
+        compilation.hooks.afterOptimizeChunks,
+        { parentSpan: () => this.runWebpackSpan }
+      )
+      this.traceHookPair(
+        'webpack-compilation-optimize-tree',
+        compilation.hooks.optimizeTree,
+        compilation.hooks.afterOptimizeTree,
+        { parentSpan: () => this.runWebpackSpan }
+      )
+      this.traceHookPair(
+        'webpack-compilation-hash',
+        compilation.hooks.beforeHash,
+        compilation.hooks.afterHash,
+        { parentSpan: () => this.runWebpackSpan }
+      )
+    })
   }
 }

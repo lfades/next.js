@@ -1,6 +1,6 @@
 # Next.js + MDX
 
-Use [MDX](https://github.com/mdx-js/mdx) with [Next.js](https://github.com/zeit/next.js)
+Use [MDX](https://github.com/mdx-js/mdx) with [Next.js](https://github.com/vercel/next.js)
 
 ## Installation
 
@@ -24,14 +24,14 @@ const withMDX = require('@next/mdx')()
 module.exports = withMDX()
 ```
 
-Optionally you can provide [MDX options](https://github.com/mdx-js/mdx#options):
+Optionally you can provide [MDX plugins](https://mdxjs.com/advanced/plugins#plugins):
 
 ```js
 // next.config.js
 const withMDX = require('@next/mdx')({
   options: {
-    mdPlugins: [],
-    hastPlugins: [],
+    remarkPlugins: [],
+    rehypePlugins: [],
   },
 })
 module.exports = withMDX()
@@ -61,7 +61,7 @@ module.exports = withMDX()
 
 ## Top level .mdx pages
 
-Define the `pageExtensions` option to have Next.js handle `.mdx` files in the `pages` directory as pages:
+Define the `pageExtensions` option to have Next.js handle `.md` and `.mdx` files in the `pages` directory as pages:
 
 ```js
 // next.config.js
@@ -69,10 +69,10 @@ const withMDX = require('@next/mdx')({
   extension: /\.mdx?$/,
 })
 module.exports = withMDX({
-  pageExtensions: ['js', 'jsx', 'mdx'],
+  pageExtensions: ['js', 'jsx', 'md', 'mdx'],
 })
 ```
 
-## Typescript
+## TypeScript
 
 Follow [this guide](https://mdxjs.com/advanced/typescript) from the MDX docs.

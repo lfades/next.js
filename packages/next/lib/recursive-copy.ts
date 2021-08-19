@@ -1,14 +1,8 @@
 import path from 'path'
-import fs from 'fs'
-import { promisify } from 'util'
-import { Sema } from 'async-sema'
+import { promises, constants, Dirent, Stats } from 'fs'
+import { Sema } from 'next/dist/compiled/async-sema'
 
-const mkdir = promisify(fs.mkdir)
-const stat = promisify(fs.stat)
-const readdir = promisify(fs.readdir)
-const copyFile = promisify(fs.copyFile)
-
-const COPYFILE_EXCL = fs.constants.COPYFILE_EXCL
+const COPYFILE_EXCL = constants.COPYFILE_EXCL
 
 export async function recursiveCopy(
   source: string,
@@ -20,24 +14,39 @@ export async function recursiveCopy(
   }: {
     concurrency?: number
     overwrite?: boolean
-    filter?(path: string): boolean
+    filter?(filePath: string): boolean
   } = {}
-) {
+): Promise<void> {
   const cwdPath = process.cwd()
   const from = path.resolve(cwdPath, source)
   const to = path.resolve(cwdPath, dest)
 
   const sema = new Sema(concurrency)
 
-  async function _copy(item: string) {
+  // deep copy the file/directory
+  async function _copy(item: string, lstats?: Stats | Dirent): Promise<void> {
     const target = item.replace(from, to)
-    const stats = await stat(item)
 
     await sema.acquire()
 
-    if (stats.isDirectory()) {
+    if (!lstats) {
+      // after lock on first run
+      lstats = await promises.lstat(from)
+    }
+
+    // readdir & lstat do not follow symbolic links
+    // if part is a symbolic link, follow it with stat
+    let isFile = lstats.isFile()
+    let isDirectory = lstats.isDirectory()
+    if (lstats.isSymbolicLink()) {
+      const stats = await promises.stat(item)
+      isFile = stats.isFile()
+      isDirectory = stats.isDirectory()
+    }
+
+    if (isDirectory) {
       try {
-        await mkdir(target)
+        await promises.mkdir(target)
       } catch (err) {
         // do not throw `folder already exists` errors
         if (err.code !== 'EEXIST') {
@@ -45,15 +54,23 @@ export async function recursiveCopy(
         }
       }
       sema.release()
-      const files = await readdir(item)
-      await Promise.all(files.map(file => _copy(path.join(item, file))))
+      const files = await promises.readdir(item, { withFileTypes: true })
+      await Promise.all(
+        files.map((file) => _copy(path.join(item, file.name), file))
+      )
     } else if (
-      stats.isFile() &&
+      isFile &&
       // before we send the path to filter
       // we remove the base path (from) and replace \ by / (windows)
       filter(item.replace(from, '').replace(/\\/g, '/'))
     ) {
-      await copyFile(item, target, overwrite ? undefined : COPYFILE_EXCL)
+      await promises.copyFile(
+        item,
+        target,
+        overwrite ? undefined : COPYFILE_EXCL
+      )
+      sema.release()
+    } else {
       sema.release()
     }
   }

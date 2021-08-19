@@ -9,13 +9,9 @@ const handle = app.getRequestHandler()
 app.prepare().then(() => {
   const server = polka()
 
-  server.get('/a', (req, res) => app.render(req, res, '/a', req.query))
-
-  server.get('/b', (req, res) => app.render(req, res, '/b', req.query))
-
   server.all('*', (req, res) => handle(req, res))
 
-  server.listen(port, err => {
+  server.listen(port, (err) => {
     if (err) throw err
     console.log(`> Ready on http://localhost:${port}`)
   })

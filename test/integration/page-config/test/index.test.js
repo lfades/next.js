@@ -1,12 +1,12 @@
 /* eslint-env jest */
-/* global jasmine */
+
 import fs from 'fs-extra'
 import { join } from 'path'
 import { nextBuild } from 'next-test-utils'
 
 const appDir = join(__dirname, '..')
 
-jasmine.DEFAULT_TIMEOUT_INTERVAL = 1000 * 60 * 2
+jest.setTimeout(1000 * 60 * 2)
 
 async function uncommentExport(page) {
   const pagePath = join(appDir, 'pages', page)
@@ -29,9 +29,7 @@ describe('Page Config', () => {
 
     try {
       const { stderr } = await nextBuild(appDir, undefined, { stderr: true })
-      expect(stderr).toMatch(
-        /https:\/\/err\.sh\/zeit\/next\.js\/invalid-page-config/
-      )
+      expect(stderr).toMatch(/\/invalid-page-config/)
     } finally {
       await reset()
     }
@@ -42,9 +40,7 @@ describe('Page Config', () => {
 
     try {
       const { stderr } = await nextBuild(appDir, undefined, { stderr: true })
-      expect(stderr).toMatch(
-        /https:\/\/err\.sh\/zeit\/next\.js\/invalid-page-config/
-      )
+      expect(stderr).toMatch(/\/invalid-page-config/)
     } finally {
       await reset()
     }
@@ -55,9 +51,7 @@ describe('Page Config', () => {
 
     try {
       const { stderr } = await nextBuild(appDir, undefined, { stderr: true })
-      expect(stderr).toMatch(
-        /https:\/\/err\.sh\/zeit\/next\.js\/invalid-page-config/
-      )
+      expect(stderr).toMatch(/\/invalid-page-config/)
     } finally {
       await reset()
     }
@@ -68,9 +62,7 @@ describe('Page Config', () => {
 
     try {
       const { stderr } = await nextBuild(appDir, undefined, { stderr: true })
-      expect(stderr).toMatch(
-        /https:\/\/err\.sh\/zeit\/next\.js\/invalid-page-config/
-      )
+      expect(stderr).toMatch(/\/invalid-page-config/)
     } finally {
       await reset()
     }
@@ -81,9 +73,29 @@ describe('Page Config', () => {
 
     try {
       const { stderr } = await nextBuild(appDir, undefined, { stderr: true })
-      expect(stderr).toMatch(
-        /https:\/\/err\.sh\/zeit\/next\.js\/invalid-page-config/
-      )
+      expect(stderr).toMatch(/\/invalid-page-config/)
+    } finally {
+      await reset()
+    }
+  })
+
+  it('shows error when page config is export from', async () => {
+    const reset = await uncommentExport('invalid/export-from.js')
+
+    try {
+      const { stderr } = await nextBuild(appDir, undefined, { stderr: true })
+      expect(stderr).toMatch(/\/invalid-page-config/)
+    } finally {
+      await reset()
+    }
+  })
+
+  it('shows error when page config is imported and exported', async () => {
+    const reset = await uncommentExport('invalid/import-export.js')
+
+    try {
+      const { stderr } = await nextBuild(appDir, undefined, { stderr: true })
+      expect(stderr).toMatch(/\/invalid-page-config/)
     } finally {
       await reset()
     }

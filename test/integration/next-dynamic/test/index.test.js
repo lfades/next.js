@@ -1,5 +1,5 @@
 /* eslint-env jest */
-/* global jasmine */
+
 import webdriver from 'next-webdriver'
 import { join } from 'path'
 import {
@@ -13,7 +13,7 @@ import {
   stopApp,
 } from 'next-test-utils'
 
-jasmine.DEFAULT_TIMEOUT_INTERVAL = 1000 * 60 * 5
+jest.setTimeout(1000 * 60 * 5)
 
 let app
 let appPort
@@ -31,7 +31,8 @@ function runTests() {
     const text = await browser.elementByCss('#first-render').text()
 
     // Failure case is 'Index<!-- -->3<!-- --><!-- -->'
-    expect(text).toBe('Index<!-- -->1<!-- -->2<!-- -->3')
+    expect(text).toBe('Index<!-- -->1<!-- -->2<!-- -->3<!-- -->4<!-- -->4')
+    expect(await browser.eval('window.caughtErrors')).toBe('')
   })
 }
 

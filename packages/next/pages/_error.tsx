@@ -1,6 +1,6 @@
 import React from 'react'
-import Head from '../next-server/lib/head'
-import { NextPageContext } from '../next-server/lib/utils'
+import Head from '../shared/lib/head'
+import { NextPageContext } from '../shared/lib/utils'
 
 const statusCodes: { [code: number]: string } = {
   400: 'Bad Request',
@@ -14,20 +14,23 @@ export type ErrorProps = {
   title?: string
 }
 
+function _getInitialProps({
+  res,
+  err,
+}: NextPageContext): Promise<ErrorProps> | ErrorProps {
+  const statusCode =
+    res && res.statusCode ? res.statusCode : err ? err.statusCode! : 404
+  return { statusCode }
+}
+
 /**
  * `Error` component used for handling errors.
  */
 export default class Error<P = {}> extends React.Component<P & ErrorProps> {
   static displayName = 'ErrorPage'
 
-  static getInitialProps({
-    res,
-    err,
-  }: NextPageContext): Promise<ErrorProps> | ErrorProps {
-    const statusCode =
-      res && res.statusCode ? res.statusCode : err ? err.statusCode! : 404
-    return { statusCode }
-  }
+  static getInitialProps = _getInitialProps
+  static origGetInitialProps = _getInitialProps
 
   render() {
     const { statusCode } = this.props
@@ -40,14 +43,26 @@ export default class Error<P = {}> extends React.Component<P & ErrorProps> {
       <div style={styles.error}>
         <Head>
           <title>
-            {statusCode}: {title}
+            {statusCode
+              ? `${statusCode}: ${title}`
+              : 'Application error: a client-side exception has occurred'}
           </title>
         </Head>
         <div>
           <style dangerouslySetInnerHTML={{ __html: 'body { margin: 0 }' }} />
           {statusCode ? <h1 style={styles.h1}>{statusCode}</h1> : null}
           <div style={styles.desc}>
-            <h2 style={styles.h2}>{title}.</h2>
+            <h2 style={styles.h2}>
+              {this.props.title || statusCode ? (
+                title
+              ) : (
+                <>
+                  Application error: a client-side exception has occurred (see
+                  the browser console for more information)
+                </>
+              )}
+              .
+            </h2>
           </div>
         </div>
       </div>

@@ -1,6 +1,5 @@
 {
-  "name": "with-next-page-transitions",
-  "version": "1.0.0",
+  "private": true,
   "scripts": {
     "dev": "next",
     "build": "next build",
@@ -8,9 +7,8 @@
   },
   "dependencies": {
     "next": "latest",
-    "react": "^16.7.0",
-    "react-dom": "^16.7.0",
-    "next-page-transitions": "1.0.0-beta.2"
-  },
-  "license": "ISC"
+    "next-page-transitions": "1.0.0-beta.2",
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  }
 }

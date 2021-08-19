@@ -1,7 +1,14 @@
-import initNext, * as next from './'
+import { initNext, version, router, emitter, render, renderError } from './'
 
-window.next = next
+window.next = {
+  version,
+  // router is initialized later so it has to be live-binded
+  get router() {
+    return router
+  },
+  emitter,
+  render,
+  renderError,
+}
 
-initNext().catch(err => {
-  console.error(`${err.message}\n${err.stack}`)
-})
+initNext().catch(console.error)

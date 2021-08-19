@@ -1,13 +1,14 @@
 {
-  "name": "with-zones-home",
-  "version": "1.0.0",
+  "private": true,
   "scripts": {
-    "dev": "next dev -p 4001"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
   "dependencies": {
     "next": "latest",
-    "react": "16.8.6",
-    "react-dom": "16.8.6"
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
   },
-  "license": "ISC"
+  "license": "MIT"
 }

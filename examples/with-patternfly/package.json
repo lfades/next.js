@@ -1,24 +1,16 @@
 {
-  "name": "with-patternfly",
-  "author": "Daniel Reinoso <danielreinoso1807@gmail.com>",
-  "version": "1.0.0",
+  "private": true,
   "scripts": {
     "dev": "next",
     "build": "next build",
     "start": "next start"
   },
   "dependencies": {
-    "@patternfly/react-core": "^3.112.3",
+    "@patternfly/react-core": "^4.121.1",
+    "@patternfly/react-icons": "^4.10.7",
     "next": "latest",
-    "next-transpile-modules": "^3.0.2",
-    "react": "^16.7.0",
-    "react-dom": "^16.7.0"
-  },
-  "devDependencies": {
-    "@zeit/next-css": "^1.0.1",
-    "file-loader": "^3.0.1",
-    "svg-url-loader": "^3.0.2",
-    "url-loader": "^1.1.2"
-  },
-  "license": "ISC"
+    "next-transpile-modules": "^8.0.0",
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  }
 }
