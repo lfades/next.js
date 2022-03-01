@@ -2,12 +2,46 @@
   "name": "next",
   "version": "12.1.1-canary.4",
   "description": "The React Framework",
-  "main": "./dist/server/next.js",
   "license": "MIT",
   "repository": "vercel/next.js",
   "bugs": "https://github.com/vercel/next.js/issues",
   "homepage": "https://nextjs.org",
   "types": "index.d.ts",
+  "exports": {
+    ".": "./dist/server/next.js",
+    "./dist/*": [
+      "./dist/*.js",
+      "./dist/*/index.js"
+    ],
+    "./app": "./dist/pages/_app.js",
+    "./babel": "./dist/build/babel/preset.js",
+    "./client": "./dist/client/index.js",
+    "./config": "./dist/shared/lib/runtime-config.js",
+    "./constants": "./dist/shared/lib/constants.js",
+    "./document": "./dist/pages/_document.js",
+    "./dynamic": "./dist/shared/lib/dynamic.js",
+    "./error": "./dist/pages/_error.js",
+    "./script": "./dist/client/script.js",
+    "./server": "./dist/server/index.js",
+    "./head": "./dist/shared/lib/head.js",
+    "./image": "./dist/client/image.js",
+    "./link": "./dist/client/link.js",
+    "./router": "./dist/client/router.js",
+    "./jest": "./dist/build/jest/jest.js",
+    "./amp": "./dist/shared/lib/amp.js",
+    "./streaming": "./dist/client/streaming.js"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "dist/*.d.ts",
+        "dist/*/index.d.ts"
+      ],
+      "types": [
+        "types/*.d.ts"
+      ]
+    }
+  },
   "files": [
     "dist",
     "app.js",
