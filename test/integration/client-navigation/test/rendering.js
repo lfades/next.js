@@ -97,12 +97,13 @@ export default function (render, fetch, ctx) {
       )
       expect(html).toContain('<meta content="my meta"/>')
       expect(html).toContain(
-        '<link rel="stylesheet" href="/dup-style.css"/><link rel="stylesheet" href="/dup-style.css"/>'
+        '<link rel="stylesheet" href="/dup-style.css"/><meta name="next-head" content="1"/><link rel="stylesheet" href="/dup-style.css"/>'
       )
-      expect(html).toContain('<link rel="stylesheet" href="dedupe-style.css"/>')
-      expect(html).not.toContain(
-        '<link rel="stylesheet" href="dedupe-style.css"/><link rel="stylesheet" href="dedupe-style.css"/>'
-      )
+      const dedupeLink = '<link rel="stylesheet" href="dedupe-style.css"/>'
+      expect(html).toContain(dedupeLink)
+      expect(
+        html.substring(html.indexOf(dedupeLink) + dedupeLink.length)
+      ).not.toContain('<link rel="stylesheet" href="dedupe-style.css"/>')
       expect(html).toContain(
         '<link rel="alternate" hrefLang="en" href="/last/en"/>'
       )
@@ -192,6 +193,15 @@ export default function (render, fetch, ctx) {
       expect(html).toContain('<script src="/test-defer.js" defer="">')
     })
 
+    it('should place charset element at the top of <head>', async () => {
+      const html = await render('/head-priority')
+      const nextHeadElement =
+        '<meta charSet="iso-8859-5"/><meta name="next-head" content="1"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="next-head" content="1"/><meta name="title" content="head title"/>'
+      const documentHeadElement =
+        '<meta name="keywords" content="document head test"/>'
+      expect(html).toContain(`${nextHeadElement}${documentHeadElement}`)
+    })
+
     it('should render the page with custom extension', async () => {
       const html = await render('/custom-extension')
       expect(html).toContain('<div>Hello</div>')
@@ -245,7 +255,7 @@ export default function (render, fetch, ctx) {
       const expectedErrorMessage =
         'Circular structure in "getInitialProps" result of page "/circular-json-error".'
 
-      expect(await hasRedbox(browser)).toBe(true)
+      expect(await hasRedbox(browser, true)).toBe(true)
       const text = await getRedboxHeader(browser)
       expect(text).toContain(expectedErrorMessage)
     })
@@ -259,7 +269,7 @@ export default function (render, fetch, ctx) {
       const expectedErrorMessage =
         '"InstanceInitialPropsPage.getInitialProps()" is defined as an instance method - visit https://nextjs.org/docs/messages/get-initial-props-as-an-instance-method for more information.'
 
-      expect(await hasRedbox(browser)).toBe(true)
+      expect(await hasRedbox(browser, true)).toBe(true)
       const text = await getRedboxHeader(browser)
       expect(text).toContain(expectedErrorMessage)
     })
@@ -269,7 +279,7 @@ export default function (render, fetch, ctx) {
       const expectedErrorMessage =
         '"EmptyInitialPropsPage.getInitialProps()" should resolve to an object. But found "null" instead.'
 
-      expect(await hasRedbox(browser)).toBe(true)
+      expect(await hasRedbox(browser, true)).toBe(true)
       const text = await getRedboxHeader(browser)
       expect(text).toContain(expectedErrorMessage)
     })
@@ -305,14 +315,14 @@ export default function (render, fetch, ctx) {
 
     test('default export is not a React Component', async () => {
       const browser = await webdriver(ctx.appPort, '/no-default-export')
-      expect(await hasRedbox(browser)).toBe(true)
+      expect(await hasRedbox(browser, true)).toBe(true)
       const text = await getRedboxHeader(browser)
       expect(text).toMatch(/The default export is not a React Component/)
     })
 
     test('error-inside-page', async () => {
       const browser = await webdriver(ctx.appPort, '/error-inside-page')
-      expect(await hasRedbox(browser)).toBe(true)
+      expect(await hasRedbox(browser, true)).toBe(true)
       const text = await getRedboxHeader(browser)
       expect(text).toMatch(/This is an expected error/)
       // Sourcemaps are applied by react-error-overlay, so we can't check them on SSR.
@@ -320,7 +330,7 @@ export default function (render, fetch, ctx) {
 
     test('error-in-the-global-scope', async () => {
       const browser = await webdriver(ctx.appPort, '/error-in-the-global-scope')
-      expect(await hasRedbox(browser)).toBe(true)
+      expect(await hasRedbox(browser, true)).toBe(true)
       const text = await getRedboxHeader(browser)
       expect(text).toMatch(/aa is not defined/)
       // Sourcemaps are applied by react-error-overlay, so we can't check them on SSR.
@@ -421,11 +431,11 @@ export default function (render, fetch, ctx) {
 
     it('should show a valid error when undefined is thrown', async () => {
       const browser = await webdriver(ctx.appPort, '/throw-undefined')
-      expect(await hasRedbox(browser)).toBe(true)
+      expect(await hasRedbox(browser, true)).toBe(true)
       const text = await getRedboxHeader(browser)
 
       expect(text).toContain(
-        'An undefined error was thrown sometime during render...'
+        'An undefined error was thrown, see here for more info:'
       )
     })
   })

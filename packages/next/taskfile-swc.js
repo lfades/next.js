@@ -1,6 +1,8 @@
 // taskr babel plugin with Babel 7 support
 // https://github.com/lukeed/taskr/pull/305
 
+const MODERN_BROWSERSLIST_TARGET = require('./src/shared/lib/modern-browserslist-target')
+
 const path = require('path')
 
 // eslint-disable-next-line import/no-extraneous-dependencies
@@ -11,24 +13,41 @@ module.exports = function (task) {
   task.plugin(
     'swc',
     {},
-    function* (file, serverOrClient, { stripExtension, dev } = {}) {
+    function* (
+      file,
+      serverOrClient,
+      {
+        stripExtension,
+        keepImportAssertions = false,
+        interopClientDefaultExport = false,
+        esm = false,
+      } = {}
+    ) {
       // Don't compile .d.ts
-      if (file.base.endsWith('.d.ts')) return
+      if (file.base.endsWith('.d.ts') || file.base.endsWith('.json')) return
 
       const isClient = serverOrClient === 'client'
-
+      /** @type {import('@swc/core').Options} */
       const swcClientOptions = {
         module: {
-          type: 'commonjs',
+          type: esm ? 'es6' : 'commonjs',
+          ignoreDynamic: true,
+          exportInteropAnnotation: true,
+        },
+        env: {
+          targets: MODERN_BROWSERSLIST_TARGET,
         },
         jsc: {
           loose: true,
-
-          target: 'es2016',
+          externalHelpers: true,
           parser: {
             syntax: 'typescript',
             dynamicImport: true,
+            importAssertions: true,
             tsx: file.base.endsWith('.tsx'),
+          },
+          experimental: {
+            keepImportAssertions,
           },
           transform: {
             react: {
@@ -42,22 +61,33 @@ module.exports = function (task) {
         },
       }
 
+      /** @type {import('@swc/core').Options} */
       const swcServerOptions = {
         module: {
-          type: 'commonjs',
+          type: esm ? 'es6' : 'commonjs',
+          ignoreDynamic: true,
+          exportInteropAnnotation: true,
         },
         env: {
           targets: {
-            node: '12.0.0',
+            // Same version defined in packages/next/package.json#engines
+            // Currently a few minors behind due to babel class transpiling
+            node: '16.8.0',
           },
         },
         jsc: {
           loose: true,
-
+          // Do not enable external helpers on server-side files build
+          // _is_native_funtion helper is not compatible with edge runtime (need investigate)
+          externalHelpers: false,
           parser: {
             syntax: 'typescript',
             dynamicImport: true,
+            importAssertions: true,
             tsx: file.base.endsWith('.tsx'),
+          },
+          experimental: {
+            keepImportAssertions,
           },
           transform: {
             react: {
@@ -75,18 +105,35 @@ module.exports = function (task) {
 
       const filePath = path.join(file.dir, file.base)
       const fullFilePath = path.join(__dirname, filePath)
-      const distFilePath = path.dirname(path.join(__dirname, 'dist', filePath))
+      const distFilePath = path.dirname(
+        // we must strip src from filePath as it isn't carried into
+        // the dist file path
+        path.join(__dirname, 'dist', filePath.replace(/^src[/\\]/, ''))
+      )
 
       const options = {
         filename: path.join(file.dir, file.base),
         sourceMaps: true,
+        inlineSourcesContent: false,
         sourceFileName: path.relative(distFilePath, fullFilePath),
 
         ...swcOptions,
       }
 
-      const output = yield transform(file.data.toString('utf-8'), options)
+      const source = file.data.toString('utf-8')
+      const output = yield transform(source, options)
       const ext = path.extname(file.base)
+
+      // Make sure the output content keeps the `"use client"` directive.
+      // TODO: Remove this once SWC fixes the issue.
+      if (/^['"]use client['"]/.test(source)) {
+        output.code =
+          '"use client";\n' +
+          output.code
+            .split('\n')
+            .map((l) => (/^['"]use client['"]/.test(l) ? '' : l))
+            .join('\n')
+      }
 
       // Replace `.ts|.tsx` with `.js` in files with an extension
       if (ext) {
@@ -95,15 +142,17 @@ module.exports = function (task) {
         file.base = file.base.replace(extRegex, stripExtension ? '' : '.js')
       }
 
-      // Workaround for noop.js loading
-      if (file.base === 'next-dev.js') {
-        output.code = output.code.replace(
-          /__REPLACE_NOOP_IMPORT__/g,
-          `import('./dev/noop');`
-        )
-      }
-
       if (output.map) {
+        if (interopClientDefaultExport && !esm) {
+          output.code += `
+if ((typeof exports.default === 'function' || (typeof exports.default === 'object' && exports.default !== null)) && typeof exports.default.__esModule === 'undefined') {
+  Object.defineProperty(exports.default, '__esModule', { value: true });
+  Object.assign(exports.default, exports);
+  module.exports = exports.default;
+}
+`
+        }
+
         const map = `${file.base}.map`
 
         output.code += Buffer.from(`\n//# sourceMappingURL=${map}`)
@@ -122,8 +171,17 @@ module.exports = function (task) {
 }
 
 function setNextVersion(code) {
-  return code.replace(
-    /process\.env\.__NEXT_VERSION/g,
-    `"${require('./package.json').version}"`
-  )
+  return code
+    .replace(
+      /process\.env\.__NEXT_VERSION/g,
+      `"${require('./package.json').version}"`
+    )
+    .replace(
+      /process\.env\.REQUIRED_APP_REACT_VERSION/,
+      `"${
+        require('../../package.json').devDependencies[
+          'react-server-dom-webpack'
+        ]
+      }"`
+    )
 }

@@ -8,7 +8,6 @@ import path, { join } from 'path'
 const appDir = join(__dirname, '../')
 let appPort
 let server
-jest.setTimeout(1000 * 60 * 2)
 
 let buildManifest
 
@@ -46,7 +45,7 @@ describe('Analytics relayer (disabled)', () => {
 
     expect(beacons.length).toBe(0)
 
-    expect(stdout).not.toMatch('Next.js Analytics')
+    expect(stdout).not.toMatch('Next.js Speed Insights')
 
     await browser.close()
   })

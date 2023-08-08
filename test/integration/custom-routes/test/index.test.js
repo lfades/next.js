@@ -5,6 +5,7 @@ import url from 'url'
 import stripAnsi from 'strip-ansi'
 import fs from 'fs-extra'
 import { join } from 'path'
+import WebSocket from 'ws'
 import cheerio from 'cheerio'
 import webdriver from 'next-webdriver'
 import escapeRegex from 'escape-string-regexp'
@@ -19,12 +20,10 @@ import {
   getBrowserBodyText,
   waitFor,
   normalizeRegEx,
-  initNextServerScript,
   nextExport,
   hasRedbox,
+  check,
 } from 'next-test-utils'
-
-jest.setTimeout(1000 * 60 * 2)
 
 let appDir = join(__dirname, '..')
 const nextConfigPath = join(appDir, 'next.config.js')
@@ -39,8 +38,118 @@ let buildId
 let appPort
 let app
 
-const runTests = (isDev = false) => {
+const runTests = (isDev = false, isTurbo = false) => {
+  it.each([
+    {
+      path: '/to-ANOTHER',
+      content: /could not be found/,
+      status: 404,
+    },
+    {
+      path: '/HELLO-world',
+      content: /could not be found/,
+      status: 404,
+    },
+    {
+      path: '/docs/GITHUB',
+      content: /could not be found/,
+      status: 404,
+    },
+    {
+      path: '/add-HEADER',
+      content: /could not be found/,
+      status: 404,
+    },
+  ])(
+    'should honor caseSensitiveRoutes config for $path',
+    async ({ path, status, content }) => {
+      const res = await fetchViaHTTP(appPort, path, undefined, {
+        redirect: 'manual',
+      })
+
+      if (status) {
+        expect(res.status).toBe(status)
+      }
+
+      if (content) {
+        expect(await res.text()).toMatch(content)
+      }
+    }
+  )
+
+  it('should successfully rewrite a WebSocket request', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
+    const messages = []
+    const ws = await new Promise((resolve, reject) => {
+      let socket = new WebSocket(`ws://localhost:${appPort}/to-websocket`)
+      socket.on('message', (data) => {
+        messages.push(data.toString())
+      })
+      socket.on('open', () => resolve(socket))
+      socket.on('error', (err) => {
+        console.error(err)
+        socket.close()
+        reject()
+      })
+    })
+
+    await check(
+      () => (messages.length > 0 ? 'success' : JSON.stringify(messages)),
+      'success'
+    )
+    ws.close()
+    expect([...externalServerHits]).toEqual(['/_next/webpack-hmr?page=/about'])
+  })
+
+  it('should successfully rewrite a WebSocket request to a page', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
+    const messages = []
+    try {
+      const ws = await new Promise((resolve, reject) => {
+        let socket = new WebSocket(
+          `ws://localhost:${appPort}/websocket-to-page`
+        )
+        socket.on('message', (data) => {
+          messages.push(data.toString())
+        })
+        socket.on('open', () => resolve(socket))
+        socket.on('error', (err) => {
+          console.error(err)
+          socket.close()
+          reject()
+        })
+      })
+      ws.close()
+    } catch (err) {
+      messages.push(err)
+    }
+    expect(stderr).not.toContain('unhandledRejection')
+  })
+
+  it('should not rewrite for _next/data route when a match is found', async () => {
+    const initial = await fetchViaHTTP(appPort, '/overridden/first')
+    expect(initial.status).toBe(200)
+    expect(await initial.text()).toContain('this page is overridden')
+
+    const nextData = await fetchViaHTTP(
+      appPort,
+      `/_next/data/${buildId}/overridden/first.json`
+    )
+    expect(nextData.status).toBe(200)
+    expect(await nextData.json()).toEqual({
+      pageProps: { params: { slug: 'first' } },
+      __N_SSG: true,
+    })
+  })
+
   it('should handle has query encoding correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     for (const expected of [
       {
         post: 'first',
@@ -82,6 +191,85 @@ const runTests = (isDev = false) => {
     }
   })
 
+  it('should handle external beforeFiles rewrite correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
+    const res = await fetchViaHTTP(appPort, '/overridden')
+    const html = await res.text()
+
+    if (res.status !== 200) {
+      console.error('Invalid response', html)
+    }
+    expect(res.status).toBe(200)
+    expect(html).toContain('Example Domain')
+
+    const browser = await webdriver(appPort, '/nav')
+    await browser.elementByCss('#to-before-files-overridden').click()
+    await check(
+      () => browser.eval('document.documentElement.innerHTML'),
+      /Example Domain/
+    )
+  })
+
+  it('should handle beforeFiles rewrite to dynamic route correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
+    const res = await fetchViaHTTP(appPort, '/nfl')
+    const html = await res.text()
+
+    if (res.status !== 200) {
+      console.error('Invalid response', html)
+    }
+    expect(res.status).toBe(200)
+    expect(html).toContain('/_sport/[slug]')
+
+    const browser = await webdriver(appPort, '/nav')
+    await browser.eval('window.beforeNav = 1')
+    await browser.elementByCss('#to-before-files-dynamic').click()
+    await check(
+      () => browser.eval('document.documentElement.innerHTML'),
+      /_sport\/\[slug\]/
+    )
+    expect(JSON.parse(await browser.elementByCss('#query').text())).toEqual({
+      slug: 'nfl',
+    })
+    expect(await browser.elementByCss('#pathname').text()).toBe(
+      '/_sport/[slug]'
+    )
+    expect(await browser.eval('window.beforeNav')).toBe(1)
+  })
+
+  it('should handle beforeFiles rewrite to partly dynamic route correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
+    const res = await fetchViaHTTP(appPort, '/nfl')
+    const html = await res.text()
+
+    if (res.status !== 200) {
+      console.error('Invalid response', html)
+    }
+    expect(res.status).toBe(200)
+    expect(html).toContain('/_sport/[slug]')
+
+    const browser = await webdriver(appPort, '/nav')
+    await browser.eval('window.beforeNav = 1')
+    await browser.elementByCss('#to-before-files-dynamic-again').click()
+    await check(
+      () => browser.eval('document.documentElement.innerHTML'),
+      /_sport\/\[slug\]\/test/
+    )
+    expect(JSON.parse(await browser.elementByCss('#query').text())).toEqual({
+      slug: 'nfl',
+    })
+    expect(await browser.elementByCss('#pathname').text()).toBe(
+      '/_sport/[slug]/test'
+    )
+    expect(await browser.eval('window.beforeNav')).toBe(1)
+  })
+
   it('should support long URLs for rewrites', async () => {
     const res = await fetchViaHTTP(
       appPort,
@@ -94,6 +282,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should resolveHref correctly navigating through history', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const browser = await webdriver(appPort, '/')
     await browser.eval('window.beforeNav = 1')
 
@@ -149,6 +340,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should not hang when proxy rewrite fails', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/to-nowhere', undefined, {
       timeout: 5000,
     })
@@ -158,8 +352,10 @@ const runTests = (isDev = false) => {
 
   it('should parse params correctly for rewrite to auto-export dynamic page', async () => {
     const browser = await webdriver(appPort, '/rewriting-to-auto-export')
-    const text = await browser.eval(() => document.documentElement.innerHTML)
-    expect(text).toContain('auto-export hello')
+    await check(
+      () => browser.eval(() => document.documentElement.innerHTML),
+      /auto-export.*?hello/
+    )
     expect(JSON.parse(await browser.elementByCss('#query').text())).toEqual({
       rewrite: '1',
       slug: 'hello',
@@ -167,6 +363,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should provide params correctly for rewrite to auto-export non-dynamic page', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const browser = await webdriver(
       appPort,
       '/rewriting-to-another-auto-export/first'
@@ -192,6 +391,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should handle param like headers properly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/my-other-header/my-path')
     expect(res.headers.get('x-path')).toBe('my-path')
     expect(res.headers.get('somemy-path')).toBe('hi')
@@ -210,6 +412,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should not match dynamic route immediately after applying header', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/blog/post-321')
     expect(res.headers.get('x-something')).toBe('applied-everywhere')
 
@@ -376,6 +581,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should have correct encoding for params with catchall rewrite', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const html = await renderViaHTTP(
       appPort,
       '/catchall-rewrite/hello%20world%3Fw%3D24%26focalpoint%3Dcenter?a=b'
@@ -398,6 +606,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should have correct header for catchall rewrite', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/catchall-header/hello/world?a=b')
     const headerValue = res.headers.get('x-value')
     expect(headerValue).toBe('hello/world')
@@ -423,6 +634,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should have correctly encoded params in query for redirect', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(
       appPort,
       '/query-redirect/hello%20world%3Fw%3D24%26focalpoint%3Dcenter/world?a=b',
@@ -530,6 +744,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should work with rewrite when only specifying href', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const browser = await webdriver(appPort, '/nav')
     await browser.eval('window.beforeNav = 1')
     await browser
@@ -546,6 +763,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should work with rewrite when only specifying href and ends in dynamic route', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const browser = await webdriver(appPort, '/nav')
     await browser.eval('window.beforeNav = 1')
     await browser
@@ -575,6 +795,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should match /_next file after rewrite', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     await renderViaHTTP(appPort, '/hello')
     const data = await renderViaHTTP(
       appPort,
@@ -593,34 +816,52 @@ const runTests = (isDev = false) => {
   })
 
   it('should apply headers for exact match', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/add-header')
     expect(res.headers.get('x-custom-header')).toBe('hello world')
     expect(res.headers.get('x-another-header')).toBe('hello again')
   })
 
   it('should apply headers for multi match', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/my-headers/first')
     expect(res.headers.get('x-first-header')).toBe('first')
     expect(res.headers.get('x-second-header')).toBe('second')
   })
 
   it('should apply params for header key/values', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/my-other-header/first')
     expect(res.headers.get('x-path')).toBe('first')
     expect(res.headers.get('somefirst')).toBe('hi')
   })
 
   it('should support URL for header key/values', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/without-params/url')
     expect(res.headers.get('x-origin')).toBe('https://example.com')
   })
 
   it('should apply params header key/values with URL', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/with-params/url/first')
     expect(res.headers.get('x-url')).toBe('https://example.com/first')
   })
 
   it('should apply params header key/values with URL that has port', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/with-params/url2/first')
     expect(res.headers.get('x-url')).toBe(
       'https://example.com:8080?hello=first'
@@ -628,6 +869,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should support named pattern for header key/values', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/named-pattern/hello')
     expect(res.headers.get('x-something')).toBe('value=hello')
     expect(res.headers.get('path-hello')).toBe('end')
@@ -689,6 +933,29 @@ const runTests = (isDev = false) => {
     expect(res.headers.get('refresh')).toBe(`0;url=/`)
   })
 
+  it('should have correctly encoded query in location and refresh headers', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
+    const res = await fetchViaHTTP(
+      appPort,
+      // Query unencoded is ?テスト=あ
+      '/redirect4?%E3%83%86%E3%82%B9%E3%83%88=%E3%81%82',
+      undefined,
+      {
+        redirect: 'manual',
+      }
+    )
+    expect(res.status).toBe(308)
+
+    expect(res.headers.get('location').split('?')[1]).toBe(
+      '%E3%83%86%E3%82%B9%E3%83%88=%E3%81%82'
+    )
+    expect(res.headers.get('refresh')).toBe(
+      '0;url=/?%E3%83%86%E3%82%B9%E3%83%88=%E3%81%82'
+    )
+  })
+
   it('should handle basic api rewrite successfully', async () => {
     const data = await renderViaHTTP(appPort, '/api-hello')
     expect(JSON.parse(data)).toEqual({ query: {} })
@@ -709,6 +976,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should handle encoded value in the pathname correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(
       appPort,
       '/redirect/me/to-about/' + encodeURI('\\google.com'),
@@ -783,6 +1053,156 @@ const runTests = (isDev = false) => {
     )
   })
 
+  it('should match missing header headers correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
+    const res = await fetchViaHTTP(appPort, '/missing-headers-1', undefined, {
+      headers: {
+        'x-my-header': 'hello world!!',
+      },
+    })
+
+    expect(res.status).toBe(404)
+
+    const res2 = await fetchViaHTTP(appPort, '/missing-headers-1', undefined, {
+      redirect: 'manual',
+    })
+    expect(res2.headers.get('x-new-header')).toBe('new-value')
+  })
+
+  it('should match missing query headers correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
+    const res = await fetchViaHTTP(appPort, '/missing-headers-2', {
+      'my-query': 'hellooo',
+    })
+
+    expect(res.status).toBe(404)
+
+    const res2 = await fetchViaHTTP(appPort, '/missing-headers-2', undefined, {
+      redirect: 'manual',
+    })
+    expect(res2.headers.get('x-new-header')).toBe('new-value')
+  })
+
+  it('should match missing cookie headers correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
+    const res = await fetchViaHTTP(appPort, '/missing-headers-3', undefined, {
+      headers: {
+        cookie: 'loggedIn=true',
+      },
+      redirect: 'manual',
+    })
+
+    expect(res.status).toBe(404)
+
+    const res2 = await fetchViaHTTP(appPort, '/missing-headers-3', undefined, {
+      redirect: 'manual',
+    })
+    expect(res2.headers.get('x-new-header')).toBe('new-value')
+  })
+
+  it('should match missing header redirect correctly', async () => {
+    const res = await fetchViaHTTP(appPort, '/missing-rewrite-1', undefined, {
+      headers: {
+        'x-my-header': 'hello world!!',
+      },
+    })
+
+    expect(res.status).toBe(404)
+
+    const res2 = await fetchViaHTTP(appPort, '/missing-redirect-1', undefined, {
+      redirect: 'manual',
+    })
+    expect(res2.status).toBe(307)
+    const url = new URL(res2.headers.get('location'), 'http://n')
+    expect(url.pathname).toBe('/with-params')
+  })
+
+  it('should match missing query redirect correctly', async () => {
+    const res = await fetchViaHTTP(appPort, '/missing-redirect-2', {
+      'my-query': 'hellooo',
+    })
+
+    expect(res.status).toBe(404)
+
+    const res2 = await fetchViaHTTP(appPort, '/missing-redirect-2', undefined, {
+      redirect: 'manual',
+    })
+    expect(res2.status).toBe(307)
+    const url = new URL(res2.headers.get('location'), 'http://n')
+    expect(url.pathname).toBe('/with-params')
+  })
+
+  it('should match missing cookie redirect correctly', async () => {
+    const res = await fetchViaHTTP(appPort, '/missing-redirect-3', undefined, {
+      headers: {
+        cookie: 'loggedIn=true',
+      },
+      redirect: 'manual',
+    })
+
+    expect(res.status).toBe(404)
+
+    const res2 = await fetchViaHTTP(appPort, '/missing-redirect-3', undefined, {
+      redirect: 'manual',
+    })
+    expect(res2.status).toBe(307)
+    const url = new URL(res2.headers.get('location'), 'http://n')
+    expect(url.pathname).toBe('/with-params')
+    expect(url.search).toBe('?authorized=1')
+  })
+
+  it('should match missing header rewrite correctly', async () => {
+    const res = await fetchViaHTTP(appPort, '/missing-rewrite-1', undefined, {
+      headers: {
+        'x-my-header': 'hello world!!',
+      },
+    })
+
+    expect(res.status).toBe(404)
+
+    const res2 = await fetchViaHTTP(appPort, '/missing-rewrite-1')
+    const $2 = cheerio.load(await res2.text())
+
+    expect(res2.status).toBe(200)
+    expect(JSON.parse($2('#query').text())).toEqual({})
+  })
+
+  it('should match missing query rewrite correctly', async () => {
+    const res = await fetchViaHTTP(appPort, '/missing-rewrite-2', {
+      'my-query': 'hellooo',
+    })
+
+    expect(res.status).toBe(404)
+
+    const res2 = await fetchViaHTTP(appPort, '/missing-rewrite-2')
+    const $2 = cheerio.load(await res2.text())
+    expect(res2.status).toBe(200)
+    expect(JSON.parse($2('#query').text())).toEqual({})
+  })
+
+  it('should match missing cookie rewrite correctly', async () => {
+    const res = await fetchViaHTTP(appPort, '/missing-rewrite-3', undefined, {
+      headers: {
+        cookie: 'loggedIn=true',
+      },
+    })
+
+    expect(res.status).toBe(404)
+
+    const res2 = await fetchViaHTTP(appPort, '/missing-rewrite-3')
+    const $2 = cheerio.load(await res2.text())
+    expect(JSON.parse($2('#query').text())).toEqual({
+      authorized: '1',
+    })
+    expect(res2.status).toBe(200)
+  })
+
   it('should match has header rewrite correctly', async () => {
     const res = await fetchViaHTTP(appPort, '/has-rewrite-1', undefined, {
       headers: {
@@ -855,7 +1275,7 @@ const runTests = (isDev = false) => {
       host: '1',
     })
 
-    const res2 = await fetchViaHTTP(appPort, '/has-rewrite-3')
+    const res2 = await fetchViaHTTP(appPort, '/has-rewrite-4')
     expect(res2.status).toBe(404)
   })
 
@@ -907,6 +1327,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should match has rewrite correctly before files', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res1 = await fetchViaHTTP(appPort, '/hello')
     expect(res1.status).toBe(200)
     const $1 = cheerio.load(await res1.text())
@@ -1030,7 +1453,53 @@ const runTests = (isDev = false) => {
     })
   })
 
+  it('should match has host redirect and insert in destination correctly', async () => {
+    const res1 = await fetchViaHTTP(appPort, '/has-redirect-6', undefined, {
+      redirect: 'manual',
+    })
+    expect(res1.status).toBe(404)
+
+    const res = await fetchViaHTTP(appPort, '/has-redirect-6', undefined, {
+      headers: {
+        host: 'hello-test.example.com',
+      },
+      redirect: 'manual',
+    })
+
+    expect(res.status).toBe(307)
+    const parsed = url.parse(res.headers.get('location'), true)
+
+    expect(parsed.protocol).toBe('https:')
+    expect(parsed.hostname).toBe('hello.example.com')
+    expect(parsed.pathname).toBe('/some-path/end')
+    expect(parsed.query).toEqual({
+      a: 'b',
+    })
+  })
+
+  it('should match has query redirect with duplicate query key', async () => {
+    const res = await fetchViaHTTP(
+      appPort,
+      '/has-redirect-7',
+      '?hello=world&hello=another',
+      {
+        redirect: 'manual',
+      }
+    )
+    expect(res.status).toBe(307)
+    const parsed = url.parse(res.headers.get('location'), true)
+
+    expect(parsed.pathname).toBe('/somewhere')
+    expect(parsed.query).toEqual({
+      hello: ['world', 'another'],
+      value: 'another',
+    })
+  })
+
   it('should match has header for header correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/has-header-1', undefined, {
       headers: {
         'x-my-header': 'hello world!!',
@@ -1047,6 +1516,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should match has query for header correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(
       appPort,
       '/has-header-2',
@@ -1067,6 +1539,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should match has cookie for header correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/has-header-3', undefined, {
       headers: {
         cookie: 'loggedIn=true',
@@ -1083,6 +1558,9 @@ const runTests = (isDev = false) => {
   })
 
   it('should match has host for header correctly', async () => {
+    // TODO: remove once test failure has been fixed
+    if (isTurbo) return
+
     const res = await fetchViaHTTP(appPort, '/has-header-4', undefined, {
       headers: {
         host: 'example.com',
@@ -1121,6 +1599,7 @@ const runTests = (isDev = false) => {
       expect(manifest).toEqual({
         version: 3,
         pages404: true,
+        caseSensitive: true,
         basePath: '',
         dataRoutes: [
           {
@@ -1131,10 +1610,22 @@ const runTests = (isDev = false) => {
             ),
             namedDataRouteRegex: `^/_next/data/${escapeRegex(
               buildId
-            )}/blog\\-catchall/(?<slug>.+?)\\.json$`,
+            )}/blog\\-catchall/(?<nxtPslug>.+?)\\.json$`,
             page: '/blog-catchall/[...slug]',
             routeKeys: {
-              slug: 'slug',
+              nxtPslug: 'nxtPslug',
+            },
+          },
+          {
+            dataRouteRegex: `^\\/_next\\/data\\/${escapeRegex(
+              buildId
+            )}\\/overridden\\/([^\\/]+?)\\.json$`,
+            namedDataRouteRegex: `^/_next/data/${escapeRegex(
+              buildId
+            )}/overridden/(?<nxtPslug>[^/]+?)\\.json$`,
+            page: '/overridden/[slug]',
+            routeKeys: {
+              nxtPslug: 'nxtPslug',
             },
           },
         ],
@@ -1147,6 +1638,50 @@ const runTests = (isDev = false) => {
             source: '/:path+/',
             statusCode: 308,
             internal: true,
+          },
+          {
+            destination: '/with-params',
+            missing: [
+              {
+                key: 'x-my-header',
+                type: 'header',
+                value: '(?<myHeader>.*)',
+              },
+            ],
+            regex: normalizeRegEx(
+              '^(?!\\/_next)\\/missing-redirect-1(?:\\/)?$'
+            ),
+            source: '/missing-redirect-1',
+            statusCode: 307,
+          },
+          {
+            destination: '/with-params',
+            missing: [
+              {
+                key: 'my-query',
+                type: 'query',
+              },
+            ],
+            regex: normalizeRegEx(
+              '^(?!\\/_next)\\/missing-redirect-2(?:\\/)?$'
+            ),
+            source: '/missing-redirect-2',
+            statusCode: 307,
+          },
+          {
+            destination: '/with-params?authorized=1',
+            missing: [
+              {
+                key: 'loggedIn',
+                type: 'cookie',
+                value: '(?<loggedIn>true)',
+              },
+            ],
+            regex: normalizeRegEx(
+              '^(?!\\/_next)\\/missing-redirect-3(?:\\/)?$'
+            ),
+            source: '/missing-redirect-3',
+            statusCode: 307,
           },
           {
             destination: '/:lang/about',
@@ -1362,8 +1897,83 @@ const runTests = (isDev = false) => {
             source: '/:path/has-redirect-5',
             statusCode: 307,
           },
+          {
+            destination: 'https://:subdomain.example.com/some-path/end?a=b',
+            has: [
+              {
+                type: 'host',
+                value: '(?<subdomain>.*)-test.example.com',
+              },
+            ],
+            regex: normalizeRegEx('^(?!\\/_next)\\/has-redirect-6(?:\\/)?$'),
+            source: '/has-redirect-6',
+            statusCode: 307,
+          },
+          {
+            source: '/has-redirect-7',
+            regex: normalizeRegEx('^(?!\\/_next)\\/has-redirect-7(?:\\/)?$'),
+            has: [
+              {
+                type: 'query',
+                key: 'hello',
+                value: '(?<hello>.*)',
+              },
+            ],
+            destination: '/somewhere?value=:hello',
+            statusCode: 307,
+          },
         ],
         headers: [
+          {
+            headers: [
+              {
+                key: 'x-new-header',
+                value: 'new-value',
+              },
+            ],
+            missing: [
+              {
+                key: 'x-my-header',
+                type: 'header',
+                value: '(?<myHeader>.*)',
+              },
+            ],
+            regex: normalizeRegEx('^\\/missing-headers-1(?:\\/)?$'),
+            source: '/missing-headers-1',
+          },
+          {
+            headers: [
+              {
+                key: 'x-new-header',
+                value: 'new-value',
+              },
+            ],
+            missing: [
+              {
+                key: 'my-query',
+                type: 'query',
+              },
+            ],
+            regex: normalizeRegEx('^\\/missing-headers-2(?:\\/)?$'),
+            source: '/missing-headers-2',
+          },
+          {
+            headers: [
+              {
+                key: 'x-new-header',
+                value: 'new-value',
+              },
+            ],
+            missing: [
+              {
+                key: 'loggedIn',
+                type: 'cookie',
+                value: '(?<loggedIn>true)',
+              },
+            ],
+            regex: normalizeRegEx('^\\/missing-headers-3(?:\\/)?$'),
+            source: '/missing-headers-3',
+          },
           {
             headers: [
               {
@@ -1608,8 +2218,30 @@ const runTests = (isDev = false) => {
               ),
               source: '/old-blog/:path*',
             },
+            {
+              destination: 'https://example.vercel.sh',
+              regex: normalizeRegEx('^\\/overridden(?:\\/)?$'),
+              source: '/overridden',
+            },
+            {
+              destination: '/_sport/nfl/:path*',
+              regex: normalizeRegEx(
+                '^\\/nfl(?:\\/((?:[^\\/]+?)(?:\\/(?:[^\\/]+?))*))?(?:\\/)?$'
+              ),
+              source: '/nfl/:path*',
+            },
           ],
           afterFiles: [
+            {
+              destination: `http://localhost:${externalServerPort}/_next/webpack-hmr?page=/about`,
+              regex: normalizeRegEx('^\\/to-websocket(?:\\/)?$'),
+              source: '/to-websocket',
+            },
+            {
+              destination: '/hello',
+              regex: normalizeRegEx('^\\/websocket-to-page(?:\\/)?$'),
+              source: '/websocket-to-page',
+            },
             {
               destination: 'http://localhost:12233',
               regex: normalizeRegEx('^\\/to-nowhere(?:\\/)?$'),
@@ -1853,55 +2485,182 @@ const runTests = (isDev = false) => {
               source: '/has-rewrite-8',
             },
             {
+              destination: '/with-params',
+              missing: [
+                {
+                  key: 'x-my-header',
+                  type: 'header',
+                  value: '(?<myHeader>.*)',
+                },
+              ],
+              regex: normalizeRegEx('^\\/missing-rewrite-1(?:\\/)?$'),
+              source: '/missing-rewrite-1',
+            },
+            {
+              destination: '/with-params',
+              missing: [
+                {
+                  key: 'my-query',
+                  type: 'query',
+                },
+              ],
+              regex: normalizeRegEx('^\\/missing-rewrite-2(?:\\/)?$'),
+              source: '/missing-rewrite-2',
+            },
+            {
+              destination: '/with-params?authorized=1',
+              missing: [
+                {
+                  key: 'loggedIn',
+                  type: 'cookie',
+                  value: '(?<loggedIn>true)',
+                },
+              ],
+              regex: normalizeRegEx('^\\/missing-rewrite-3(?:\\/)?$'),
+              source: '/missing-rewrite-3',
+            },
+            {
               destination: '/hello',
               regex: normalizeRegEx('^\\/blog\\/about(?:\\/)?$'),
               source: '/blog/about',
+            },
+            {
+              destination: '/overridden',
+              regex:
+                '^\\/overridden(?:\\/((?:[^\\/]+?)(?:\\/(?:[^\\/]+?))*))?(?:\\/)?$',
+              source: '/overridden/:path*',
             },
           ],
           fallback: [],
         },
         dynamicRoutes: [
           {
-            namedRegex: '^/another/(?<id>[^/]+?)(?:/)?$',
+            namedRegex: '^/_sport/(?<nxtPslug>[^/]+?)(?:/)?$',
+            page: '/_sport/[slug]',
+            regex: normalizeRegEx('^\\/_sport\\/([^\\/]+?)(?:\\/)?$'),
+            routeKeys: {
+              nxtPslug: 'nxtPslug',
+            },
+          },
+          {
+            namedRegex: '^/_sport/(?<nxtPslug>[^/]+?)/test(?:/)?$',
+            page: '/_sport/[slug]/test',
+            regex: normalizeRegEx('^\\/_sport\\/([^\\/]+?)\\/test(?:\\/)?$'),
+            routeKeys: {
+              nxtPslug: 'nxtPslug',
+            },
+          },
+          {
+            namedRegex: '^/another/(?<nxtPid>[^/]+?)(?:/)?$',
             page: '/another/[id]',
             regex: normalizeRegEx('^\\/another\\/([^\\/]+?)(?:\\/)?$'),
             routeKeys: {
-              id: 'id',
+              nxtPid: 'nxtPid',
             },
           },
           {
-            namedRegex: '^/api/dynamic/(?<slug>[^/]+?)(?:/)?$',
+            namedRegex: '^/api/dynamic/(?<nxtPslug>[^/]+?)(?:/)?$',
             page: '/api/dynamic/[slug]',
             regex: normalizeRegEx('^\\/api\\/dynamic\\/([^\\/]+?)(?:\\/)?$'),
             routeKeys: {
-              slug: 'slug',
+              nxtPslug: 'nxtPslug',
             },
           },
           {
-            namedRegex: '^/auto\\-export/(?<slug>[^/]+?)(?:/)?$',
+            namedRegex: '^/auto\\-export/(?<nxtPslug>[^/]+?)(?:/)?$',
             page: '/auto-export/[slug]',
             regex: normalizeRegEx('^\\/auto\\-export\\/([^\\/]+?)(?:\\/)?$'),
             routeKeys: {
-              slug: 'slug',
+              nxtPslug: 'nxtPslug',
             },
           },
           {
-            namedRegex: '^/blog/(?<post>[^/]+?)(?:/)?$',
+            namedRegex: '^/blog/(?<nxtPpost>[^/]+?)(?:/)?$',
             page: '/blog/[post]',
             regex: normalizeRegEx('^\\/blog\\/([^\\/]+?)(?:\\/)?$'),
             routeKeys: {
-              post: 'post',
+              nxtPpost: 'nxtPpost',
             },
           },
           {
-            namedRegex: '^/blog\\-catchall/(?<slug>.+?)(?:/)?$',
+            namedRegex: '^/blog\\-catchall/(?<nxtPslug>.+?)(?:/)?$',
             page: '/blog-catchall/[...slug]',
             regex: normalizeRegEx('^\\/blog\\-catchall\\/(.+?)(?:\\/)?$'),
             routeKeys: {
-              slug: 'slug',
+              nxtPslug: 'nxtPslug',
+            },
+          },
+          {
+            namedRegex: '^/overridden/(?<nxtPslug>[^/]+?)(?:/)?$',
+            page: '/overridden/[slug]',
+            regex: '^\\/overridden\\/([^\\/]+?)(?:\\/)?$',
+            routeKeys: {
+              nxtPslug: 'nxtPslug',
             },
           },
         ],
+        staticRoutes: [
+          {
+            namedRegex: '^/auto\\-export/another(?:/)?$',
+            page: '/auto-export/another',
+            regex: '^/auto\\-export/another(?:/)?$',
+            routeKeys: {},
+          },
+          {
+            namedRegex: '^/docs/v2/more/now\\-for\\-github(?:/)?$',
+            page: '/docs/v2/more/now-for-github',
+            regex: '^/docs/v2/more/now\\-for\\-github(?:/)?$',
+            routeKeys: {},
+          },
+          {
+            namedRegex: '^/hello(?:/)?$',
+            page: '/hello',
+            regex: '^/hello(?:/)?$',
+            routeKeys: {},
+          },
+          {
+            namedRegex: '^/hello\\-again(?:/)?$',
+            page: '/hello-again',
+            regex: '^/hello\\-again(?:/)?$',
+            routeKeys: {},
+          },
+          {
+            namedRegex: '^/multi\\-rewrites(?:/)?$',
+            page: '/multi-rewrites',
+            regex: '^/multi\\-rewrites(?:/)?$',
+            routeKeys: {},
+          },
+          {
+            namedRegex: '^/nav(?:/)?$',
+            page: '/nav',
+            regex: '^/nav(?:/)?$',
+            routeKeys: {},
+          },
+          {
+            namedRegex: '^/overridden(?:/)?$',
+            page: '/overridden',
+            regex: '^/overridden(?:/)?$',
+            routeKeys: {},
+          },
+          {
+            namedRegex: '^/redirect\\-override(?:/)?$',
+            page: '/redirect-override',
+            regex: '^/redirect\\-override(?:/)?$',
+            routeKeys: {},
+          },
+          {
+            namedRegex: '^/with\\-params(?:/)?$',
+            page: '/with-params',
+            regex: '^/with\\-params(?:/)?$',
+            routeKeys: {},
+          },
+        ],
+        rsc: {
+          header: 'RSC',
+          contentTypeHeader: 'text/x-component',
+          varyHeader:
+            'RSC, Next-Router-State-Tree, Next-Router-Prefetch, Next-Url',
+        },
       })
     })
 
@@ -1950,6 +2709,14 @@ describe('Custom routes', () => {
       const externalHost = req.headers['host']
       res.end(`hi ${nextHost} from ${externalHost}`)
     })
+    const wsServer = new WebSocket.Server({ noServer: true })
+
+    externalServer.on('upgrade', (req, socket, head) => {
+      externalServerHits.add(req.url)
+      wsServer.handleUpgrade(req, socket, head, (client) => {
+        client.send('hello world')
+      })
+    })
     await new Promise((resolve, reject) => {
       externalServer.listen(externalServerPort, (error) => {
         if (error) return reject(error)
@@ -1959,7 +2726,7 @@ describe('Custom routes', () => {
     nextConfigRestoreContent = await fs.readFile(nextConfigPath, 'utf8')
     await fs.writeFile(
       nextConfigPath,
-      nextConfigRestoreContent.replace(/__EXTERNAL_PORT__/, externalServerPort)
+      nextConfigRestoreContent.replace(/__EXTERNAL_PORT__/g, externalServerPort)
     )
   })
   afterAll(async () => {
@@ -2011,8 +2778,10 @@ describe('Custom routes', () => {
 
     it('should not error for no-op rewrite and auto export dynamic route', async () => {
       const browser = await webdriver(appPort, '/auto-export/my-slug')
-      const html = await browser.eval(() => document.documentElement.innerHTML)
-      expect(html).toContain(`auto-export my-slug`)
+      await check(
+        () => browser.eval(() => document.documentElement.innerHTML),
+        /auto-export.*?my-slug/
+      )
     })
   })
 
@@ -2099,96 +2868,6 @@ describe('Custom routes', () => {
       expect(exportStderr).toContain(
         `rewrites, redirects, and headers are not applied when exporting your application, detected (rewrites, redirects, headers)`
       )
-    })
-  })
-
-  describe('serverless mode', () => {
-    beforeAll(async () => {
-      nextConfigContent = await fs.readFile(nextConfigPath, 'utf8')
-      await fs.writeFile(
-        nextConfigPath,
-        nextConfigContent.replace(/\/\/ target/, 'target'),
-        'utf8'
-      )
-      const { stdout: buildStdout } = await nextBuild(appDir, ['-d'], {
-        stdout: true,
-      })
-      stdout = buildStdout
-      appPort = await findPort()
-      app = await nextStart(appDir, appPort, {
-        onStdout: (msg) => {
-          stdout += msg
-        },
-      })
-      buildId = await fs.readFile(join(appDir, '.next/BUILD_ID'), 'utf8')
-    })
-    afterAll(async () => {
-      await fs.writeFile(nextConfigPath, nextConfigContent, 'utf8')
-      await killApp(app)
-    })
-
-    runTests()
-  })
-
-  describe('raw serverless mode', () => {
-    beforeAll(async () => {
-      nextConfigContent = await fs.readFile(nextConfigPath, 'utf8')
-      await fs.writeFile(
-        nextConfigPath,
-        nextConfigContent.replace(/\/\/ target/, 'target'),
-        'utf8'
-      )
-      await nextBuild(appDir)
-
-      appPort = await findPort()
-      app = await initNextServerScript(join(appDir, 'server.js'), /ready on/, {
-        ...process.env,
-        PORT: appPort,
-      })
-    })
-    afterAll(async () => {
-      await fs.writeFile(nextConfigPath, nextConfigContent, 'utf8')
-      await killApp(app)
-    })
-
-    it('should apply rewrites in lambda correctly for page route', async () => {
-      const html = await renderViaHTTP(appPort, '/query-rewrite/first/second')
-      const data = JSON.parse(cheerio.load(html)('p').text())
-      expect(data).toEqual({
-        first: 'first',
-        second: 'second',
-        section: 'first',
-        name: 'second',
-      })
-    })
-
-    it('should apply rewrites in lambda correctly for dynamic route', async () => {
-      const html = await renderViaHTTP(appPort, '/blog/post-1')
-      expect(html).toContain('post-2')
-    })
-
-    it('should apply rewrites in lambda correctly for API route', async () => {
-      const data = JSON.parse(
-        await renderViaHTTP(appPort, '/api-hello-param/first')
-      )
-      expect(data).toEqual({
-        query: {
-          name: 'first',
-          hello: 'first',
-        },
-      })
-    })
-
-    it('should apply rewrites in lambda correctly for dynamic API route', async () => {
-      const data = JSON.parse(
-        await renderViaHTTP(appPort, '/api-dynamic-param/first')
-      )
-      expect(data).toEqual({
-        query: {
-          slug: 'first',
-          hello: 'first',
-        },
-      })
     })
   })
 

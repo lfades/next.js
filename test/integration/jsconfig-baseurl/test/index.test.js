@@ -3,15 +3,15 @@
 import fs from 'fs-extra'
 import { join } from 'path'
 import cheerio from 'cheerio'
+import stripAnsi from 'next/dist/compiled/strip-ansi'
 import {
   renderViaHTTP,
   findPort,
   launchApp,
   killApp,
+  nextBuild,
   check,
 } from 'next-test-utils'
-
-jest.setTimeout(1000 * 60 * 2)
 
 const appDir = join(__dirname, '..')
 let appPort
@@ -55,12 +55,35 @@ describe('TypeScript Features', () => {
       await renderViaHTTP(appPort, '/hello')
 
       const found = await check(
-        () => output,
+        () => stripAnsi(output),
         /Module not found: Can't resolve 'components\/worldd'/,
         false
       )
       await fs.writeFile(basicPage, contents)
       expect(found).toBe(true)
+    })
+  })
+
+  describe('should build', () => {
+    beforeAll(async () => {
+      await nextBuild(appDir)
+    })
+    it('should trace correctly', async () => {
+      const helloTrace = await fs.readJSON(
+        join(appDir, '.next/server/pages/hello.js.nft.json')
+      )
+      const appTrace = await fs.readJSON(
+        join(appDir, '.next/server/pages/_app.js.nft.json')
+      )
+      expect(
+        appTrace.files.some((file) => file.includes('node_modules/next'))
+      ).toBe(true)
+      expect(
+        helloTrace.files.some((file) => file.includes('components/world.js'))
+      ).toBe(false)
+      expect(
+        helloTrace.files.some((file) => file.includes('react/index.js'))
+      ).toBe(true)
     })
   })
 })

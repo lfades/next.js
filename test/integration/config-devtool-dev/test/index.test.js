@@ -11,8 +11,6 @@ import {
 import webdriver from 'next-webdriver'
 import { join } from 'path'
 
-jest.setTimeout(1000 * 30)
-
 const appDir = join(__dirname, '../')
 
 describe('devtool set in development mode in next config', () => {
@@ -34,21 +32,21 @@ describe('devtool set in development mode in next config', () => {
     )
 
     const browser = await webdriver(appPort, '/')
-    expect(await hasRedbox(browser)).toBe(true)
+    expect(await hasRedbox(browser, true)).toBe(true)
     if (process.platform === 'win32') {
       // TODO: add win32 snapshot
     } else {
       expect(await getRedboxSource(browser)).toMatchInlineSnapshot(`
-        "pages/index.js (5:10) @ eval
+"pages/index.js (5:10) @ eval
 
-          3 | export default function Index(props) {
-          4 |   useEffect(() => {
-        > 5 |     throw new Error('this should render')
-            |          ^
-          6 |   }, [])
-          7 |   return <div>Index Page</div>
-          8 | }"
-      `)
+  3 | export default function Index(props) {
+  4 | useEffect(() => {
+> 5 |   throw new Error('this should render')
+    |        ^
+  6 | }, [])
+  7 | return <div>Index Page</div>
+  8 | }"
+`)
     }
     await browser.close()
 

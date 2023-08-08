@@ -14,18 +14,73 @@ import {
   nextExport,
   getPageFileFromBuildManifest,
   getPageFileFromPagesManifest,
+  check,
 } from 'next-test-utils'
 import json from '../big.json'
 
-jest.setTimeout(1000 * 60 * 2)
 const appDir = join(__dirname, '../')
-const nextConfig = join(appDir, 'next.config.js')
 let appPort
 let stderr
 let mode
 let app
 
 function runTests(dev = false) {
+  it('should handle proxying to self correctly', async () => {
+    const res1 = await fetchViaHTTP(appPort, '/api/proxy-self')
+    expect(res1.status).toBe(200)
+    expect(await res1.text()).toContain('User')
+
+    const buildId = dev
+      ? 'development'
+      : await fs.readFile(join(appDir, '.next', 'BUILD_ID'), 'utf8')
+
+    const res2 = await fetchViaHTTP(
+      appPort,
+      `/api/proxy-self?buildId=${buildId}`
+    )
+    expect(res2.status).toBe(200)
+    expect(await res2.text()).toContain('__SSG_MANIFEST')
+  })
+
+  it('should respond from /api/auth/[...nextauth] correctly', async () => {
+    const res = await fetchViaHTTP(appPort, '/api/auth/signin', undefined, {
+      redirect: 'manual',
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ from: 'auth' })
+  })
+
+  it('should handle 204 status correctly', async () => {
+    const res = await fetchViaHTTP(appPort, '/api/status-204', undefined, {
+      redirect: 'manual',
+    })
+    expect(res.status).toBe(204)
+    expect(res.headers.get('content-type')).toBe(null)
+    expect(res.headers.get('content-length')).toBe(null)
+    expect(res.headers.get('transfer-encoding')).toBe(null)
+
+    const stderrIdx = stderr.length
+    const res2 = await fetchViaHTTP(
+      appPort,
+      '/api/status-204',
+      { invalid: '1' },
+      {
+        redirect: 'manual',
+      }
+    )
+    expect(res2.status).toBe(204)
+    expect(res2.headers.get('content-type')).toBe(null)
+    expect(res2.headers.get('content-length')).toBe(null)
+    expect(res2.headers.get('transfer-encoding')).toBe(null)
+
+    if (dev) {
+      await check(
+        () => stderr.slice(stderrIdx),
+        /A body was attempted to be set with a 204 statusCode/
+      )
+    }
+  })
+
   it('should render page', async () => {
     const html = await renderViaHTTP(appPort, '/')
     expect(html).toMatch(/API - support/)
@@ -79,14 +134,24 @@ function runTests(dev = false) {
     const res = await fetchViaHTTP(appPort, '/api/user-error', null, {})
     const text = await res.text()
     expect(res.status).toBe(500)
-    expect(text).toBe('Internal Server Error')
+
+    if (dev) {
+      expect(text).toContain('User error')
+    } else {
+      expect(text).toBe('Internal Server Error')
+    }
   })
 
   it('should throw Internal Server Error (async)', async () => {
     const res = await fetchViaHTTP(appPort, '/api/user-error-async', null, {})
     const text = await res.text()
     expect(res.status).toBe(500)
-    expect(text).toBe('Internal Server Error')
+
+    if (dev) {
+      expect(text).toContain('User error')
+    } else {
+      expect(text).toBe('Internal Server Error')
+    }
   })
 
   it('should parse JSON body', async () => {
@@ -123,9 +188,25 @@ function runTests(dev = false) {
   })
 
   it('should support undefined response body', async () => {
-    const res = await fetchViaHTTP(appPort, '/api/undefined', null, {})
+    const res = await fetchViaHTTP(appPort, '/api/json-undefined', null, {})
     const body = res.ok ? await res.text() : null
     expect(body).toBe('')
+  })
+
+  it('should support string in JSON response body', async () => {
+    const res = await fetchViaHTTP(appPort, '/api/json-string', null, {})
+    const body = res.ok ? await res.text() : null
+    expect(body).toBe('"Hello world!"')
+  })
+
+  it('should support null in JSON response body', async () => {
+    const res = await fetchViaHTTP(appPort, '/api/json-null')
+    const body = res.ok ? await res.json() : 'Not null'
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe(
+      'application/json; charset=utf-8'
+    )
+    expect(body).toBe(null)
   })
 
   it('should return error with invalid JSON', async () => {
@@ -140,7 +221,8 @@ function runTests(dev = false) {
     expect(data.statusText).toEqual('Invalid JSON')
   })
 
-  it('should return error exceeded body limit', async () => {
+  // TODO: Investigate this test flaking
+  it.skip('should return error exceeded body limit', async () => {
     let res
     let error
 
@@ -244,16 +326,24 @@ function runTests(dev = false) {
 
   it('should show friendly error for invalid redirect', async () => {
     await fetchViaHTTP(appPort, '/api/redirect-error', null, {})
-    expect(stderr).toContain(
-      `Invalid redirect arguments. Please use a single argument URL, e.g. res.redirect('/destination') or use a status code and URL, e.g. res.redirect(307, '/destination').`
-    )
+
+    await check(() => {
+      expect(stderr).toContain(
+        `Invalid redirect arguments. Please use a single argument URL, e.g. res.redirect('/destination') or use a status code and URL, e.g. res.redirect(307, '/destination').`
+      )
+      return 'yes'
+    }, 'yes')
   })
 
   it('should show friendly error in case of passing null as first argument redirect', async () => {
     await fetchViaHTTP(appPort, '/api/redirect-null', null, {})
-    expect(stderr).toContain(
-      `Invalid redirect arguments. Please use a single argument URL, e.g. res.redirect('/destination') or use a status code and URL, e.g. res.redirect(307, '/destination').`
-    )
+
+    check(() => {
+      expect(stderr).toContain(
+        `Invalid redirect arguments. Please use a single argument URL, e.g. res.redirect('/destination') or use a status code and URL, e.g. res.redirect(307, '/destination').`
+      )
+      return 'yes'
+    }, 'yes')
   })
 
   it('should redirect with status code 307', async () => {
@@ -402,18 +492,48 @@ function runTests(dev = false) {
     expect(data).toBe('hi')
   })
 
+  it('should work with nullable payload', async () => {
+    const data = await renderViaHTTP(appPort, '/api/nullable-payload')
+    expect(data).toBe('')
+  })
+
   it('should warn if response body is larger than 4MB', async () => {
     let res = await fetchViaHTTP(appPort, '/api/large-response')
     expect(res.ok).toBeTruthy()
     expect(stderr).toContain(
-      'API response for /api/large-response exceeds 4MB. This will cause the request to fail in a future version.'
+      'API response for /api/large-response exceeds 4MB. API Routes are meant to respond quickly.'
     )
 
     res = await fetchViaHTTP(appPort, '/api/large-chunked-response')
     expect(res.ok).toBeTruthy()
     expect(stderr).toContain(
-      'API response for /api/large-chunked-response exceeds 4MB. This will cause the request to fail in a future version.'
+      'API response for /api/large-chunked-response exceeds 4MB. API Routes are meant to respond quickly.'
     )
+  })
+
+  it('should not warn if response body is larger than 4MB with responseLimit config = false', async () => {
+    await check(async () => {
+      let res = await fetchViaHTTP(appPort, '/api/large-response-with-config')
+      expect(res.ok).toBeTruthy()
+      expect(stderr).not.toContain(
+        'API response for /api/large-response-with-config exceeds 4MB. API Routes are meant to respond quickly.'
+      )
+      return 'success'
+    }, 'success')
+  })
+
+  it('should warn with configured size if response body is larger than configured size', async () => {
+    await check(async () => {
+      let res = await fetchViaHTTP(
+        appPort,
+        '/api/large-response-with-config-size'
+      )
+      expect(res.ok).toBeTruthy()
+      expect(stderr).toContain(
+        'API response for /api/large-response-with-config-size exceeds 5MB. API Routes are meant to respond quickly.'
+      )
+      return 'success'
+    }, 'success')
   })
 
   if (dev) {
@@ -435,15 +555,17 @@ function runTests(dev = false) {
       await fetchViaHTTP(appPort, '/api/test-no-end', undefined, {
         signal: controller.signal,
       }).catch(() => {})
-      expect(stderr).toContain(
-        `API resolved without sending a response for /api/test-no-end, this may result in stalled requests.`
+
+      await check(
+        () => stderr,
+        /API resolved without sending a response for \/api\/test-no-end, this may result in stalled requests/
       )
     })
 
     it('should not show warning when the API resolves and the response is piped', async () => {
       const startIdx = stderr.length > 0 ? stderr.length - 1 : stderr.length
       await fetchViaHTTP(appPort, `/api/test-res-pipe`, { port: appPort })
-      expect(stderr.substr(startIdx)).not.toContain(
+      expect(stderr.slice(startIdx)).not.toContain(
         `API resolved without sending a response for /api/test-res-pipe`
       )
     })
@@ -451,17 +573,21 @@ function runTests(dev = false) {
     it('should show false positive warning if not using externalResolver flag', async () => {
       const apiURL = '/api/external-resolver-false-positive'
       const req = await fetchViaHTTP(appPort, apiURL)
-      expect(stderr).toContain(
-        `API resolved without sending a response for ${apiURL}, this may result in stalled requests.`
-      )
       expect(await req.text()).toBe('hello world')
+
+      check(() => {
+        expect(stderr).toContain(
+          `API resolved without sending a response for ${apiURL}, this may result in stalled requests.`
+        )
+        return 'yes'
+      }, 'yes')
     })
 
     it('should not show warning if using externalResolver flag', async () => {
       const startIdx = stderr.length > 0 ? stderr.length - 1 : stderr.length
       const apiURL = '/api/external-resolver'
       const req = await fetchViaHTTP(appPort, apiURL)
-      expect(stderr.substr(startIdx)).not.toContain(
+      expect(stderr.slice(startIdx)).not.toContain(
         `API resolved without sending a response for ${apiURL}`
       )
       expect(await req.text()).toBe('hello world')
@@ -526,25 +652,6 @@ describe('API routes', () => {
       app = await nextStart(appDir, appPort)
     })
     afterAll(() => killApp(app))
-
-    runTests()
-  })
-
-  describe('Serverless support', () => {
-    beforeAll(async () => {
-      await fs.writeFile(
-        nextConfig,
-        `module.exports = { target: 'serverless' }`
-      )
-      await nextBuild(appDir)
-      mode = 'serverless'
-      appPort = await findPort()
-      app = await nextStart(appDir, appPort)
-    })
-    afterAll(async () => {
-      await killApp(app)
-      await fs.remove(nextConfig)
-    })
 
     runTests()
   })

@@ -16,8 +16,6 @@ import cheerio from 'cheerio'
 import webdriver from 'next-webdriver'
 import { join } from 'path'
 
-jest.setTimeout(1000 * 60 * 1)
-
 let app
 let appPort
 const appDir = join(__dirname, '..')
@@ -51,7 +49,7 @@ const showsError = async (pathname, regex, click = false, isWarn = false) => {
         return warnLogs.join('\n')
       }, regex)
     } else {
-      expect(await hasRedbox(browser)).toBe(true)
+      expect(await hasRedbox(browser, true)).toBe(true)
       const errorContent = await getRedboxHeader(browser)
       expect(errorContent).toMatch(regex)
     }

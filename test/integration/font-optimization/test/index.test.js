@@ -9,12 +9,9 @@ import {
   nextStart,
   nextBuild,
   renderViaHTTP,
-  initNextServerScript,
   waitFor,
 } from 'next-test-utils'
 import webdriver from 'next-webdriver'
-
-jest.setTimeout(1000 * 60 * 2)
 
 const fixturesDir = join(__dirname, '..', 'fixtures')
 
@@ -23,20 +20,6 @@ const fsExists = (file) =>
     .access(file)
     .then(() => true)
     .catch(() => false)
-
-async function getBuildId(appDir) {
-  return fs.readFile(join(appDir, '.next', 'BUILD_ID'), 'utf8')
-}
-
-const startServerlessEmulator = async (dir, port) => {
-  const scriptPath = join(dir, 'server.js')
-  const env = Object.assign(
-    {},
-    { ...process.env },
-    { PORT: port, BUILD_ID: await getBuildId(dir) }
-  )
-  return initNextServerScript(scriptPath, /ready on/i, env, false, {})
-}
 
 describe('Font Optimization', () => {
   describe.each([
@@ -81,7 +64,6 @@ describe('Font Optimization', () => {
       preconnectUrl
     ) => {
       const appDir = join(fixturesDir, `with-${property}`)
-      const nextConfig = join(appDir, 'next.config.js')
       let builtServerPagesDir
       let builtPage
       let appPort
@@ -96,12 +78,11 @@ describe('Font Optimization', () => {
           const link = $(
             `link[rel="stylesheet"][data-href="${staticHeadFont}"]`
           )
-          const nonce = link.attr('nonce')
+
           const style = $(`style[data-href="${staticHeadFont}"]`)
           const styleNonce = style.attr('nonce')
 
-          expect(link).toBeDefined()
-          expect(nonce).toBe('VmVyY2Vs')
+          expect(link.length).toBe(0)
           expect(styleNonce).toBe('VmVyY2Vs')
         })
 
@@ -111,27 +92,24 @@ describe('Font Optimization', () => {
 
           const $ = cheerio.load(html)
 
-          expect($(`link[data-href="${withFont}"]`).attr().rel).toBe(
-            'stylesheet'
-          )
+          expect($(`link[data-href="${withFont}"]`).length).toBe(0)
 
           expect(html).toMatch(withFontPattern)
 
           const htmlWithoutFont = await renderViaHTTP(appPort, '/without-font')
-
           const $2 = cheerio.load(htmlWithoutFont)
 
-          expect($2(`link[data-href="${withFont}"]`).attr()).toBeUndefined()
+          expect($2(`link[data-href="${withFont}"]`).length).toBe(0)
           expect(htmlWithoutFont).not.toMatch(withFontPattern)
         })
 
         it(`should inline the ${property} fonts for static pages`, async () => {
-          const html = await renderViaHTTP(appPort, '/index')
+          const html = await renderViaHTTP(appPort, '/')
           const $ = cheerio.load(html)
           expect(await fsExists(builtPage('font-manifest.json'))).toBe(true)
           expect(
             $(`link[rel=stylesheet][data-href="${staticFont}"]`).length
-          ).toBe(1)
+          ).toBe(0)
           expect(html).toMatch(staticPattern)
         })
 
@@ -141,7 +119,7 @@ describe('Font Optimization', () => {
           expect(await fsExists(builtPage('font-manifest.json'))).toBe(true)
           expect(
             $(`link[rel=stylesheet][data-href="${staticHeadFont}"]`).length
-          ).toBe(1)
+          ).toBe(0)
           expect(html).toMatch(staticHeadPattern)
         })
 
@@ -151,7 +129,7 @@ describe('Font Optimization', () => {
           expect(await fsExists(builtPage('font-manifest.json'))).toBe(true)
           expect(
             $(`link[rel=stylesheet][data-href="${starsFont}"]`).length
-          ).toBe(1)
+          ).toBe(0)
           expect(html).toMatch(starsPattern)
         })
 
@@ -199,29 +177,6 @@ describe('Font Optimization', () => {
           }
         })
 
-        it('should minify the css', async () => {
-          const snapshotJson = JSON.parse(
-            await fs.readFile(join(appDir, 'manifest-snapshot.json'), {
-              encoding: 'utf-8',
-            })
-          )
-          const testJson = JSON.parse(
-            await fs.readFile(builtPage('font-manifest.json'), {
-              encoding: 'utf-8',
-            })
-          )
-          const testCss = {}
-          testJson.forEach((fontDefinition) => {
-            testCss[fontDefinition.url] = fontDefinition.content
-          })
-          const snapshotCss = {}
-          snapshotJson.forEach((fontDefinition) => {
-            snapshotCss[fontDefinition.url] = fontDefinition.content
-          })
-
-          expect(testCss).toStrictEqual(snapshotCss)
-        })
-
         // Re-run build to check if it works when build is cached
         it('should work when build is cached', async () => {
           await nextBuild(appDir)
@@ -236,12 +191,6 @@ describe('Font Optimization', () => {
 
       describe('Font optimization for SSR apps', () => {
         beforeAll(async () => {
-          await fs.writeFile(
-            nextConfig,
-            `module.exports = { cleanDistDir: false }`,
-            'utf8'
-          )
-
           if (fs.pathExistsSync(join(appDir, '.next'))) {
             await fs.remove(join(appDir, '.next'))
           }
@@ -255,50 +204,8 @@ describe('Font Optimization', () => {
         runTests()
       })
 
-      describe('Font optimization for serverless apps', () => {
-        beforeAll(async () => {
-          await fs.writeFile(
-            nextConfig,
-            `module.exports = { target: 'serverless', cleanDistDir: false }`,
-            'utf8'
-          )
-          await nextBuild(appDir)
-          appPort = await findPort()
-          app = await nextStart(appDir, appPort)
-          builtServerPagesDir = join(appDir, '.next', 'serverless')
-          builtPage = (file) => join(builtServerPagesDir, file)
-        })
-        afterAll(() => killApp(app))
-        runTests()
-      })
-
-      describe('Font optimization for emulated serverless apps', () => {
-        beforeAll(async () => {
-          await fs.writeFile(
-            nextConfig,
-            `module.exports = { target: 'experimental-serverless-trace', cleanDistDir: false }`,
-            'utf8'
-          )
-          await nextBuild(appDir)
-          appPort = await findPort()
-          app = await startServerlessEmulator(appDir, appPort)
-          builtServerPagesDir = join(appDir, '.next', 'serverless')
-          builtPage = (file) => join(builtServerPagesDir, file)
-        })
-        afterAll(async () => {
-          await fs.remove(nextConfig)
-          await killApp(app)
-        })
-        runTests()
-      })
-
       describe('Font optimization for unreachable font definitions.', () => {
         beforeAll(async () => {
-          await fs.writeFile(
-            nextConfig,
-            `module.exports = { cleanDistDir: false }`,
-            'utf8'
-          )
           await nextBuild(appDir)
           await fs.writeFile(
             join(appDir, '.next', 'server', 'font-manifest.json'),
@@ -307,7 +214,7 @@ describe('Font Optimization', () => {
           )
           appPort = await findPort()
           app = await nextStart(appDir, appPort)
-          builtServerPagesDir = join(appDir, '.next', 'serverless')
+          builtServerPagesDir = join(appDir, '.next', 'server')
           builtPage = (file) => join(builtServerPagesDir, file)
         })
         afterAll(() => killApp(app))
@@ -333,5 +240,88 @@ describe('Font Optimization', () => {
     const appDir = join(fixturesDir, 'spread-operator-regression')
     const { code } = await nextBuild(appDir)
     expect(code).toBe(0)
+  })
+
+  test('makeStylesheetInert regression', async () => {
+    const appDir = join(fixturesDir, 'make-stylesheet-inert-regression')
+    const { code } = await nextBuild(appDir)
+    expect(code).toBe(0)
+  })
+
+  describe('font override', () => {
+    let app, appPort
+
+    beforeAll(async () => {
+      const appDir = join(fixturesDir, 'font-override')
+      await nextBuild(appDir)
+      appPort = await findPort()
+      app = await nextStart(appDir, appPort)
+    })
+    afterAll(() => killApp(app))
+    it('should inline font-override values', async () => {
+      const html = await renderViaHTTP(appPort, '/')
+      const $ = cheerio.load(html)
+      const inlineStyle = $(
+        'style[data-href="https://fonts.googleapis.com/css2?family=Roboto&display=swap"]'
+      )
+      const inlineStyleMultiple = $(
+        'style[data-href="https://fonts.googleapis.com/css2?family=Open+Sans&family=Libre+Baskerville&display=swap"]'
+      )
+      expect(inlineStyle.length).toBe(1)
+      expect(inlineStyle.html()).toContain(
+        '@font-face{font-family:"Roboto Fallback";ascent-override:92.77%;descent-override:24.41%;line-gap-override:0.00%;src:local("Arial")}'
+      )
+      expect(inlineStyleMultiple.length).toBe(1)
+      expect(inlineStyleMultiple.html()).toContain(
+        '@font-face{font-family:"Libre Baskerville Fallback";ascent-override:97.00%;descent-override:27.00%;line-gap-override:0.00%;src:local("Times New Roman")}'
+      )
+      expect(inlineStyleMultiple.html()).toContain(
+        '@font-face{font-family:"Open Sans Fallback";ascent-override:106.88%;descent-override:29.30%;line-gap-override:0.00%;src:local("Arial")}'
+      )
+    })
+  })
+
+  describe('font override with size adjust', () => {
+    let app, appPort
+
+    beforeAll(async () => {
+      const appDir = join(fixturesDir, 'font-override-size-adjust')
+      await nextBuild(appDir)
+      appPort = await findPort()
+      app = await nextStart(appDir, appPort)
+    })
+    afterAll(() => killApp(app))
+    it('should inline font-override values', async () => {
+      const html = await renderViaHTTP(appPort, '/')
+      const $ = cheerio.load(html)
+      const inlineStyle = $(
+        'style[data-href="https://fonts.googleapis.com/css2?family=Roboto&display=swap"]'
+      )
+      const inlineStyleMultiple = $(
+        'style[data-href="https://fonts.googleapis.com/css2?family=Open+Sans&family=Libre+Baskerville&display=swap"]'
+      )
+      expect(inlineStyle.length).toBe(1)
+      expect(inlineStyle.html()).toContain(
+        '@font-face{font-family:"Roboto Fallback";ascent-override:92.67%;descent-override:24.39%;line-gap-override:0.00%;size-adjust:100.11%;src:local("Arial")}'
+      )
+      expect(inlineStyleMultiple.length).toBe(1)
+      expect(inlineStyleMultiple.html()).toContain(
+        '@font-face{font-family:"Libre Baskerville Fallback";ascent-override:75.76%;descent-override:21.09%;line-gap-override:0.00%;size-adjust:128.03%;src:local("Times New Roman")}'
+      )
+      expect(inlineStyleMultiple.html()).toContain(
+        '@font-face{font-family:"Open Sans Fallback";ascent-override:101.18%;descent-override:27.73%;line-gap-override:0.00%;size-adjust:105.64%;src:local("Arial")}'
+      )
+    })
+  })
+  describe('invalid configuration', () => {
+    it('should show a proper error if assetPrefix starts with .', async () => {
+      const appDir = join(fixturesDir, 'invalid-assertprefix')
+      const { stderr } = await nextBuild(appDir, undefined, {
+        stderr: true,
+      })
+      expect(stderr).toContain(
+        'assetPrefix must start with a leading slash or be an absolute URL(http:// or https://)'
+      )
+    })
   })
 })

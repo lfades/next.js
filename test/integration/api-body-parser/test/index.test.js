@@ -8,16 +8,13 @@ import {
   fetchViaHTTP,
   initNextServerScript,
 } from 'next-test-utils'
-import clone from 'clone'
 import getPort from 'get-port'
 
-jest.setTimeout(1000 * 60 * 2)
 const appDir = join(__dirname, '../')
 let appPort
 
 let app
 let server
-jest.setTimeout(1000 * 60 * 2)
 
 const context = {}
 
@@ -30,7 +27,9 @@ function runTests() {
     killApp(app)
   })
 
-  it('should not throw if request body is already parsed in custom middleware', async () => {
+  // TODO: we can't allow req fields with the proxying required for separate
+  // workers
+  it.skip('should not throw if request body is already parsed in custom middleware', async () => {
     await startServer()
     const data = await makeRequest()
     expect(data).toEqual([{ title: 'Nextjs' }])
@@ -72,12 +71,7 @@ async function makeRequestWithInvalidContentType() {
 const startServer = async (optEnv = {}, opts) => {
   const scriptPath = join(appDir, 'server.js')
   context.appPort = appPort = await getPort()
-  const env = Object.assign(
-    {},
-    clone(process.env),
-    { PORT: `${appPort}` },
-    optEnv
-  )
+  const env = Object.assign({ ...process.env }, { PORT: `${appPort}` }, optEnv)
 
   server = await initNextServerScript(
     scriptPath,

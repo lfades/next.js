@@ -16,9 +16,8 @@ import {
   launchApp,
   fetchViaHTTP,
   check,
+  renderViaHTTP,
 } from 'next-test-utils'
-
-jest.setTimeout(60 * 1000)
 
 const appDir = join(__dirname, '../app')
 const outdir = join(appDir, 'out')
@@ -68,7 +67,7 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
       expect(res.status).toBe(307)
       const parsedUrl = url.parse(res.headers.get('location'), true)
 
-      expect(parsedUrl.hostname).toBe('localhost')
+      expect(parsedUrl.hostname).toBeOneOf(['localhost', '127.0.0.1'])
       expect(parsedUrl.pathname).toBe('/test/google.com')
       expect(parsedUrl.query).toEqual({})
       expect(await res.text()).toBe('/test/google.com')
@@ -85,7 +84,7 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
       expect(res2.status).toBe(307)
       const parsedUrl2 = url.parse(res2.headers.get('location'), true)
 
-      expect(parsedUrl2.hostname).toBe('localhost')
+      expect(parsedUrl2.hostname).toBeOneOf(['localhost', '127.0.0.1'])
       expect(parsedUrl2.pathname).toBe('/test/google.com')
       expect(parsedUrl2.query).toEqual({})
       expect(await res2.text()).toBe('/test/google.com')
@@ -101,7 +100,7 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
 
       const parsedUrl = url.parse(res.headers.get('location'), true)
       expect(parsedUrl.pathname).toBe('/google.com')
-      expect(parsedUrl.hostname).toBe('localhost')
+      expect(parsedUrl.hostname).toBeOneOf(['localhost', '127.0.0.1'])
       expect(parsedUrl.query).toEqual({})
     }
 
@@ -130,7 +129,7 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
       expect(res.status).toBe(308)
       const parsedUrl = url.parse(res.headers.get('location'), true)
       expect(parsedUrl.pathname).toBe('/google.com')
-      expect(parsedUrl.hostname).toBe('localhost')
+      expect(parsedUrl.hostname).toBeOneOf(['localhost', '127.0.0.1'])
       expect(parsedUrl.query).toEqual({ h: '1' })
     }
 
@@ -154,7 +153,7 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
       expect(res.status).toBe(308)
       const parsedUrl = url.parse(res.headers.get('location'), true)
       expect(parsedUrl.pathname).toBe('/google.com')
-      expect(parsedUrl.hostname).toBe('localhost')
+      expect(parsedUrl.hostname).toBeOneOf(['localhost', '127.0.0.1'])
       expect(parsedUrl.query).toEqual({})
     }
 
@@ -242,7 +241,7 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
       expect(res.status).toBe(308)
       const parsedUrl = url.parse(res.headers.get('location'), true)
       expect(parsedUrl.pathname).toBe('/google.com')
-      expect(parsedUrl.hostname).toBe('localhost')
+      expect(parsedUrl.hostname).toBeOneOf(['localhost', '127.0.0.1'])
       expect(parsedUrl.query).toEqual({})
       expect(await res.text()).toBe('/google.com')
     }
@@ -267,7 +266,7 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
       expect(res.status).toBe(308)
       const parsedUrl = url.parse(res.headers.get('location'), true)
       expect(parsedUrl.pathname).toBe(isExport ? '//google.com' : '/google.com')
-      expect(parsedUrl.hostname).toBe('localhost')
+      expect(parsedUrl.hostname).toBeOneOf(['localhost', '127.0.0.1'])
       expect(parsedUrl.query).toEqual({})
       expect(await res.text()).toBe('/google.com')
     }
@@ -304,14 +303,12 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
           browser.eval(
             'window.caughtErrors.map(err => typeof err !== "string" ? err.message : err).join(", ")'
           ),
-        new RegExp(escapeRegex(`Invalid href passed to next/router: ${href}`))
+        new RegExp(escapeRegex(`Invalid href '${href}'`))
       )
     }
   })
 
   it('should handle slashes in router push correctly', async () => {
-    const browser = await webdriver(appPort, '/')
-
     for (const item of [
       {
         page: '/another',
@@ -337,6 +334,7 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
         hash: '#hello',
       },
     ]) {
+      const browser = await webdriver(appPort, '/')
       await browser.eval(
         `window.next.router.push("${item.href}"${
           item.as ? `, "${item.as}"` : ''
@@ -352,8 +350,6 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
   })
 
   it('should have no error from encoded slashes in router push', async () => {
-    const browser = await webdriver(appPort, '/')
-
     for (const item of [
       {
         page: '/another',
@@ -378,6 +374,7 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
         hash: '#hello',
       },
     ]) {
+      const browser = await webdriver(appPort, '/')
       await browser.eval(`(function() {
         window.beforeNav = 1
         window.next.router.push("${item.href}"${
@@ -398,9 +395,11 @@ function runTests({ isDev = false, isExport = false, isPages404 = false }) {
       expect(await browser.eval('window.next.router.asPath')).toBe(
         item.as || item.href
       )
-      expect(await browser.eval('window.beforeNav')).toBe(
-        item.shouldHardNav !== false ? null : 1
-      )
+      if (item.shouldHardNav !== false) {
+        expect(await browser.eval('window.beforeNav')).toBeFalsy()
+      } else {
+        expect(await browser.eval('window.beforeNav')).toBe(1)
+      }
     }
   })
 }
@@ -424,6 +423,10 @@ describe('404 handling', () => {
       beforeAll(async () => {
         appPort = await findPort()
         app = await launchApp(appDir, appPort, nextOpts)
+
+        // prebuild pages
+        await renderViaHTTP(appPort, '/')
+        await renderViaHTTP(appPort, '/another')
       })
       afterAll(() => killApp(app))
 

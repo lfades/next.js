@@ -13,7 +13,7 @@ const camelCase = (value: string): string => {
   const val = value.replace(/[-_\s.]+(.)?/g, (_match, chr) =>
     chr ? chr.toUpperCase() : ''
   )
-  return val.substr(0, 1).toUpperCase() + val.substr(1)
+  return val.slice(0, 1).toUpperCase() + val.slice(1)
 }
 
 const isValidIdentifier = (value: string): boolean =>
@@ -24,7 +24,7 @@ export default function transformer(
   api: API,
   options: Options
 ) {
-  const j = api.jscodeshift
+  const j = api.jscodeshift.withParser('tsx')
   const root = j(file.source)
 
   let hasModifications: boolean

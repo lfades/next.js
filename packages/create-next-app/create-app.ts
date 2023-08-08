@@ -1,15 +1,13 @@
 /* eslint-disable import/no-extraneous-dependencies */
 import retry from 'async-retry'
-import chalk from 'chalk'
-import cpy from 'cpy'
+import { red, green, cyan } from 'picocolors'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   downloadAndExtractExample,
   downloadAndExtractRepo,
   getRepoInfo,
-  hasExample,
+  existsInRepo,
   hasRepo,
   RepoInfo,
 } from './helpers/examples'
@@ -18,33 +16,57 @@ import { tryGitInit } from './helpers/git'
 import { install } from './helpers/install'
 import { isFolderEmpty } from './helpers/is-folder-empty'
 import { getOnline } from './helpers/is-online'
-import { shouldUseYarn } from './helpers/should-use-yarn'
 import { isWriteable } from './helpers/is-writeable'
+import type { PackageManager } from './helpers/get-pkg-manager'
+
+import {
+  getTemplateFile,
+  installTemplate,
+  TemplateMode,
+  TemplateType,
+} from './templates'
 
 export class DownloadError extends Error {}
 
 export async function createApp({
   appPath,
-  useNpm,
+  packageManager,
   example,
   examplePath,
   typescript,
+  tailwind,
+  eslint,
+  appRouter,
+  srcDir,
+  importAlias,
 }: {
   appPath: string
-  useNpm: boolean
+  packageManager: PackageManager
   example?: string
   examplePath?: string
-  typescript?: boolean
+  typescript: boolean
+  tailwind: boolean
+  eslint: boolean
+  appRouter: boolean
+  srcDir: boolean
+  importAlias: string
 }): Promise<void> {
   let repoInfo: RepoInfo | undefined
-  const template = typescript ? 'typescript' : 'default'
+  const mode: TemplateMode = typescript ? 'ts' : 'js'
+  const template: TemplateType = appRouter
+    ? tailwind
+      ? 'app-tw'
+      : 'app'
+    : tailwind
+    ? 'default-tw'
+    : 'default'
 
   if (example) {
     let repoUrl: URL | undefined
 
     try {
       repoUrl = new URL(example)
-    } catch (error) {
+    } catch (error: any) {
       if (error.code !== 'ERR_INVALID_URL') {
         console.error(error)
         process.exit(1)
@@ -54,7 +76,7 @@ export async function createApp({
     if (repoUrl) {
       if (repoUrl.origin !== 'https://github.com') {
         console.error(
-          `Invalid URL: ${chalk.red(
+          `Invalid URL: ${red(
             `"${example}"`
           )}. Only GitHub repositories are supported. Please use a GitHub URL and try again.`
         )
@@ -65,7 +87,7 @@ export async function createApp({
 
       if (!repoInfo) {
         console.error(
-          `Found invalid GitHub URL: ${chalk.red(
+          `Found invalid GitHub URL: ${red(
             `"${example}"`
           )}. Please fix the URL and try again.`
         )
@@ -76,24 +98,24 @@ export async function createApp({
 
       if (!found) {
         console.error(
-          `Could not locate the repository for ${chalk.red(
+          `Could not locate the repository for ${red(
             `"${example}"`
           )}. Please check that the repository exists and try again.`
         )
         process.exit(1)
       }
     } else if (example !== '__internal-testing-retry') {
-      const found = await hasExample(example)
+      const found = await existsInRepo(example)
 
       if (!found) {
         console.error(
-          `Could not locate an example named ${chalk.red(
+          `Could not locate an example named ${red(
             `"${example}"`
           )}. It could be due to the following:\n`,
-          `1. Your spelling of example ${chalk.red(
+          `1. Your spelling of example ${red(
             `"${example}"`
           )} might be incorrect.\n`,
-          `2. You might not be connected to the internet.`
+          `2. You might not be connected to the internet or you are behind a proxy.`
         )
         process.exit(1)
       }
@@ -119,16 +141,17 @@ export async function createApp({
     process.exit(1)
   }
 
-  const useYarn = useNpm ? false : shouldUseYarn()
+  const useYarn = packageManager === 'yarn'
   const isOnline = !useYarn || (await getOnline())
   const originalDirectory = process.cwd()
 
-  const displayedCommand = useYarn ? 'yarn' : 'npm'
-  console.log(`Creating a new Next.js app in ${chalk.green(root)}.`)
+  console.log(`Creating a new Next.js app in ${green(root)}.`)
   console.log()
 
-  await makeDir(root)
   process.chdir(root)
+
+  const packageJsonPath = path.join(root, 'package.json')
+  let hasPackageJson = false
 
   if (example) {
     /**
@@ -138,7 +161,7 @@ export async function createApp({
       if (repoInfo) {
         const repoInfo2 = repoInfo
         console.log(
-          `Downloading files from repo ${chalk.cyan(
+          `Downloading files from repo ${cyan(
             example
           )}. This might take a moment.`
         )
@@ -148,7 +171,7 @@ export async function createApp({
         })
       } else {
         console.log(
-          `Downloading files for example ${chalk.cyan(
+          `Downloading files for example ${cyan(
             example
           )}. This might take a moment.`
         )
@@ -158,126 +181,59 @@ export async function createApp({
         })
       }
     } catch (reason) {
-      throw new DownloadError(reason)
+      function isErrorLike(err: unknown): err is { message: string } {
+        return (
+          typeof err === 'object' &&
+          err !== null &&
+          typeof (err as { message?: unknown }).message === 'string'
+        )
+      }
+      throw new DownloadError(
+        isErrorLike(reason) ? reason.message : reason + ''
+      )
     }
-    // Copy our default `.gitignore` if the application did not provide one
+    // Copy `.gitignore` if the application did not provide one
     const ignorePath = path.join(root, '.gitignore')
     if (!fs.existsSync(ignorePath)) {
       fs.copyFileSync(
-        path.join(__dirname, 'templates', template, 'gitignore'),
+        getTemplateFile({ template, mode, file: 'gitignore' }),
         ignorePath
       )
     }
 
-    // Copy default `next-env.d.ts` to any example that is typescript
+    // Copy `next-env.d.ts` to any example that is typescript
     const tsconfigPath = path.join(root, 'tsconfig.json')
     if (fs.existsSync(tsconfigPath)) {
       fs.copyFileSync(
-        path.join(__dirname, 'templates', 'typescript', 'next-env.d.ts'),
+        getTemplateFile({ template, mode: 'ts', file: 'next-env.d.ts' }),
         path.join(root, 'next-env.d.ts')
       )
     }
 
-    console.log('Installing packages. This might take a couple of minutes.')
-    console.log()
+    hasPackageJson = fs.existsSync(packageJsonPath)
+    if (hasPackageJson) {
+      console.log('Installing packages. This might take a couple of minutes.')
+      console.log()
 
-    await install(root, null, { useYarn, isOnline })
-    console.log()
+      await install(root, null, { packageManager, isOnline })
+      console.log()
+    }
   } else {
     /**
-     * Otherwise, if an example repository is not provided for cloning, proceed
+     * If an example repository is not provided for cloning, proceed
      * by installing from a template.
      */
-    console.log(chalk.bold(`Using ${displayedCommand}.`))
-    /**
-     * Create a package.json for the new project.
-     */
-    const packageJson = {
-      name: appName,
-      version: '0.1.0',
-      private: true,
-      scripts: {
-        dev: 'next dev',
-        build: 'next build',
-        start: 'next start',
-        lint: 'next lint',
-      },
-    }
-    /**
-     * Write it to disk.
-     */
-    fs.writeFileSync(
-      path.join(root, 'package.json'),
-      JSON.stringify(packageJson, null, 2) + os.EOL
-    )
-    /**
-     * These flags will be passed to `install()`.
-     */
-    const installFlags = { useYarn, isOnline }
-    /**
-     * Default dependencies.
-     */
-    const dependencies = ['react', 'react-dom', 'next']
-    /**
-     * Default devDependencies.
-     */
-    const devDependencies = ['eslint', 'eslint-config-next']
-    /**
-     * TypeScript projects will have type definitions and other devDependencies.
-     */
-    if (typescript) {
-      devDependencies.push('typescript', '@types/react')
-    }
-    /**
-     * Install package.json dependencies if they exist.
-     */
-    if (dependencies.length) {
-      console.log()
-      console.log('Installing dependencies:')
-      for (const dependency of dependencies) {
-        console.log(`- ${chalk.cyan(dependency)}`)
-      }
-      console.log()
-
-      await install(root, dependencies, installFlags)
-    }
-    /**
-     * Install package.json devDependencies if they exist.
-     */
-    if (devDependencies.length) {
-      console.log()
-      console.log('Installing devDependencies:')
-      for (const devDependency of devDependencies) {
-        console.log(`- ${chalk.cyan(devDependency)}`)
-      }
-      console.log()
-
-      const devInstallFlags = { devDependencies: true, ...installFlags }
-      await install(root, devDependencies, devInstallFlags)
-    }
-    console.log()
-    /**
-     * Copy the template files to the target directory.
-     */
-    await cpy('**', root, {
-      parents: true,
-      cwd: path.join(__dirname, 'templates', template),
-      rename: (name) => {
-        switch (name) {
-          case 'gitignore':
-          case 'eslintrc.json': {
-            return '.'.concat(name)
-          }
-          // README.md is ignored by webpack-asset-relocator-loader used by ncc:
-          // https://github.com/vercel/webpack-asset-relocator-loader/blob/e9308683d47ff507253e37c9bcbb99474603192b/src/asset-relocator.js#L227
-          case 'README-template.md': {
-            return 'README.md'
-          }
-          default: {
-            return name
-          }
-        }
-      },
+    await installTemplate({
+      appName,
+      root,
+      template,
+      mode,
+      packageManager,
+      isOnline,
+      tailwind,
+      eslint,
+      srcDir,
+      importAlias,
     })
   }
 
@@ -293,23 +249,24 @@ export async function createApp({
     cdpath = appPath
   }
 
-  console.log(`${chalk.green('Success!')} Created ${appName} at ${appPath}`)
-  console.log('Inside that directory, you can run several commands:')
-  console.log()
-  console.log(chalk.cyan(`  ${displayedCommand} ${useYarn ? '' : 'run '}dev`))
-  console.log('    Starts the development server.')
-  console.log()
-  console.log(chalk.cyan(`  ${displayedCommand} ${useYarn ? '' : 'run '}build`))
-  console.log('    Builds the app for production.')
-  console.log()
-  console.log(chalk.cyan(`  ${displayedCommand} start`))
-  console.log('    Runs the built app in production mode.')
-  console.log()
-  console.log('We suggest that you begin by typing:')
-  console.log()
-  console.log(chalk.cyan('  cd'), cdpath)
-  console.log(
-    `  ${chalk.cyan(`${displayedCommand} ${useYarn ? '' : 'run '}dev`)}`
-  )
+  console.log(`${green('Success!')} Created ${appName} at ${appPath}`)
+
+  if (hasPackageJson) {
+    console.log('Inside that directory, you can run several commands:')
+    console.log()
+    console.log(cyan(`  ${packageManager} ${useYarn ? '' : 'run '}dev`))
+    console.log('    Starts the development server.')
+    console.log()
+    console.log(cyan(`  ${packageManager} ${useYarn ? '' : 'run '}build`))
+    console.log('    Builds the app for production.')
+    console.log()
+    console.log(cyan(`  ${packageManager} start`))
+    console.log('    Runs the built app in production mode.')
+    console.log()
+    console.log('We suggest that you begin by typing:')
+    console.log()
+    console.log(cyan('  cd'), cdpath)
+    console.log(`  ${cyan(`${packageManager} ${useYarn ? '' : 'run '}dev`)}`)
+  }
   console.log()
 }

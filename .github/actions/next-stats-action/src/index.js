@@ -41,8 +41,11 @@ if (!allowedActions.has(actionInfo.actionName) && !actionInfo.isRelease) {
 
     // clone PR/newer repository/ref first to get settings
     if (!actionInfo.skipClone) {
-      await cloneRepo(actionInfo.prRepo, diffRepoDir)
-      await checkoutRef(actionInfo.prRef, diffRepoDir)
+      await cloneRepo(actionInfo.prRepo, diffRepoDir, actionInfo.prRef)
+    }
+
+    if (actionInfo.isRelease) {
+      process.env.STATS_IS_RELEASE = 'true'
     }
 
     // load stats config from allowed locations
@@ -61,21 +64,20 @@ if (!allowedActions.has(actionInfo.actionName) && !actionInfo.isRelease) {
       statsConfig.mainRepo = actionInfo.prRepo
     }
 
-    // clone main repository/ref
-    if (!actionInfo.skipClone) {
-      await cloneRepo(statsConfig.mainRepo, mainRepoDir)
-      await checkoutRef(statsConfig.mainBranch, mainRepoDir)
-    }
     /* eslint-disable-next-line */
     actionInfo.commitId = await getCommitId(diffRepoDir)
+    let mainNextSwcVersion
 
     if (!actionInfo.skipClone) {
+      let mainRef = statsConfig.mainBranch
+
       if (actionInfo.isRelease) {
-        logger('Release detected, resetting mainRepo to last stable tag')
-        const lastStableTag = await getLastStable(mainRepoDir, actionInfo.prRef)
+        logger(`Release detected, using last stable tag: "${actionInfo.prRef}"`)
+        const lastStableTag = await getLastStable(diffRepoDir, actionInfo.prRef)
+        mainRef = lastStableTag
+        mainNextSwcVersion = lastStableTag
         if (!lastStableTag) throw new Error('failed to get last stable tag')
-        console.log('using latestStable', lastStableTag)
-        await checkoutRef(lastStableTag, mainRepoDir)
+        logger(`using latestStable: "${lastStableTag}"`)
 
         /* eslint-disable-next-line */
         actionInfo.lastStableTag = lastStableTag
@@ -86,12 +88,15 @@ if (!allowedActions.has(actionInfo.actionName) && !actionInfo.isRelease) {
           /* eslint-disable-next-line */
           actionInfo.commentEndpoint = `https://api.github.com/repos/${statsConfig.mainRepo}/commits/${actionInfo.commitId}/comments`
         }
-      } else if (statsConfig.autoMergeMain) {
+      }
+
+      await cloneRepo(statsConfig.mainRepo, mainRepoDir, mainRef)
+
+      if (!actionInfo.isRelease && statsConfig.autoMergeMain) {
         logger('Attempting auto merge of main branch')
         await mergeBranch(statsConfig.mainBranch, mainRepoDir, diffRepoDir)
       }
     }
-
     let mainRepoPkgPaths
     let diffRepoPkgPaths
 
@@ -101,9 +106,15 @@ if (!allowedActions.has(actionInfo.actionName) && !actionInfo.isRelease) {
     for (const dir of repoDirs) {
       logger(`Running initial build for ${dir}`)
       if (!actionInfo.skipClone) {
+        const usePnpm = await fs.pathExists(path.join(dir, 'pnpm-lock.yaml'))
+
         let buildCommand = `cd ${dir}${
           !statsConfig.skipInitialInstall
-            ? ' && yarn install --network-timeout 1000000'
+            ? usePnpm
+              ? // --no-frozen-lockfile is used here to tolerate lockfile
+                // changes from merging latest changes
+                ` && pnpm install --no-frozen-lockfile && pnpm run build`
+              : ' && yarn install --network-timeout 1000000'
             : ''
         }`
 
@@ -115,10 +126,24 @@ if (!allowedActions.has(actionInfo.actionName) && !actionInfo.isRelease) {
         await exec(buildCommand, false, { timeout: 5 * 60 * 1000 })
       }
 
-      logger(`Linking packages in ${dir}`)
-      const pkgPaths = await linkPackages(dir)
+      await fs
+        .copy(
+          path.join(__dirname, '../native'),
+          path.join(dir, 'packages/next-swc/native')
+        )
+        .catch(console.error)
 
-      if (dir === mainRepoDir) mainRepoPkgPaths = pkgPaths
+      console.log(await exec(`ls ${path.join(__dirname, '../native')}`))
+      console.log(await exec(`cd ${dir} && ls ${dir}/packages/next-swc/native`))
+
+      logger(`Linking packages in ${dir}`)
+      const isMainRepo = dir === mainRepoDir
+      const pkgPaths = await linkPackages({
+        repoDir: dir,
+        nextSwcVersion: isMainRepo ? mainNextSwcVersion : undefined,
+      })
+
+      if (isMainRepo) mainRepoPkgPaths = pkgPaths
       else diffRepoPkgPaths = pkgPaths
     }
 

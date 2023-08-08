@@ -11,10 +11,8 @@ import {
   launchApp,
 } from 'next-test-utils'
 
-jest.setTimeout(1000 * 60 * 2)
 const appDir = join(__dirname, '..')
 const page404 = join(appDir, 'pages/404.js')
-const nextConfig = join(appDir, 'next.config.js')
 let appPort
 let app
 
@@ -47,7 +45,7 @@ describe('Custom _error', () => {
       await fs.writeFile(page404, 'export default <h1>')
       const html = await renderViaHTTP(appPort, '/404')
       await fs.remove(page404)
-      expect(html).toContain('Syntax error')
+      expect(html).toContain('Unexpected eof')
       expect(stderr).not.toMatch(customErrNo404Match)
     })
   })
@@ -77,8 +75,8 @@ describe('Custom _error', () => {
     it('should warn on custom /_error without custom /404', async () => {
       stderr = ''
       const html = await renderViaHTTP(appPort, '/404')
-      expect(html).toContain('An error 404 occurred on server')
       expect(stderr).toMatch(customErrNo404Match)
+      expect(html).toContain('An error 404 occurred on server')
     })
   })
 
@@ -99,24 +97,6 @@ describe('Custom _error', () => {
     it('should not contain /_error in build output', async () => {
       expect(buildOutput).toMatch(/λ .*?\/404/)
       expect(buildOutput).not.toMatch(/λ .*?\/_error/)
-    })
-
-    runTests()
-  })
-
-  describe('serverless mode', () => {
-    beforeAll(async () => {
-      await fs.writeFile(
-        nextConfig,
-        `module.exports = { target: 'serverless' }`
-      )
-      await nextBuild(appDir)
-      appPort = await findPort()
-      app = await nextStart(appDir, appPort)
-    })
-    afterAll(async () => {
-      await killApp(app)
-      await fs.remove(nextConfig)
     })
 
     runTests()

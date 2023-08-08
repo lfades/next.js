@@ -1,47 +1,38 @@
 /* eslint-env jest */
 
 import webdriver from 'next-webdriver'
-import cheerio from 'cheerio'
-import { check } from 'next-test-utils'
+import { check, renderViaHTTP } from 'next-test-utils'
 
-export default (context, render) => {
-  async function get$(path, query) {
-    const html = await render(path, query)
-    return cheerio.load(html)
-  }
-
-  it('should resolve suspense modules on server side if suspense', async () => {
-    const $ = await get$('/suspense/no-preload')
-    const nextData = JSON.parse($('#__NEXT_DATA__').text())
-    const content = $('#__next').text()
-    expect(content).toBe('barfoo')
-    expect(nextData.dynamicIds).toBeUndefined()
-  })
-
-  it('should resolve suspense on server side if not suspended on server', async () => {
-    const $ = await get$('/suspense/no-thrown')
-    const html = $('body').html()
-    // there might be html comments between text, test hello only
-    expect(html).toContain('hello')
-    expect(JSON.parse($('#__NEXT_DATA__').text()).dynamicIds).toBeUndefined()
-  })
-
-  it('should resolve suspense on server side if suspended on server', async () => {
-    const $ = await get$('/suspense/thrown')
-    const html = $('body').html()
-    expect(html).toContain('hello')
-    expect(JSON.parse($('#__NEXT_DATA__').text()).dynamicIds).toBeUndefined()
-  })
-
-  it('should hydrate suspenses on client side if suspended on server', async () => {
+export default (context, _render) => {
+  async function withBrowser(path, cb) {
     let browser
     try {
-      browser = await webdriver(context.appPort, '/suspense/thrown')
-      await check(() => browser.elementByCss('body').text(), /hello/)
+      browser = await webdriver(context.appPort, path)
+      await cb(browser)
     } finally {
       if (browser) {
         await browser.close()
       }
     }
+  }
+
+  it('flushes styled-jsx styles as the page renders', async () => {
+    const html = await renderViaHTTP(
+      context.appPort,
+      '/use-flush-effect/styled-jsx'
+    )
+    const stylesOccurrence = html.match(/color:(\s)*blue/g) || []
+    expect(stylesOccurrence.length).toBe(1)
+
+    await withBrowser('/use-flush-effect/styled-jsx', async (browser) => {
+      await check(
+        () => browser.waitForElementByCss('#__jsx-900f996af369fc74').text(),
+        /blue/
+      )
+      await check(
+        () => browser.waitForElementByCss('#__jsx-8b0811664c4e575e').text(),
+        /red/
+      )
+    })
   })
 }

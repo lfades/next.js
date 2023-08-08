@@ -1,7 +1,7 @@
 {
   "root": true,
   "parser": "@babel/eslint-parser",
-  "plugins": ["react", "react-hooks", "jest", "import"],
+  "plugins": ["react", "react-hooks", "jest", "import", "jsdoc"],
   "env": {
     "browser": true,
     "commonjs": true,
@@ -15,7 +15,7 @@
       "jsx": true
     },
     "babelOptions": {
-      "presets": ["@babel/preset-env", "@babel/preset-react"],
+      "presets": ["next/babel"],
       "caller": {
         // Eslint supports top level await when a parser for it is included. We enable the parser by default for Babel.
         "supportsTopLevelAwait": true
@@ -30,47 +30,64 @@
   },
   "overrides": [
     {
-      "files": ["test/**/*.test.js"],
+      "files": ["test/**/*.js", "test/**/*.ts", "**/*.test.ts"],
       "extends": ["plugin:jest/recommended"],
       "rules": {
         "jest/expect-expect": "off",
         "jest/no-disabled-tests": "off",
         "jest/no-conditional-expect": "off",
         "jest/valid-title": "off",
-        "jest/no-interpolation-in-snapshots": "off"
+        "jest/no-interpolation-in-snapshots": "off",
+        "jest/no-export": "off"
       }
     },
     { "files": ["**/__tests__/**"], "env": { "jest": true } },
     {
+      "extends": [
+        "plugin:@typescript-eslint/recommended",
+        "plugin:@typescript-eslint/stylistic"
+      ],
       "files": ["**/*.ts", "**/*.tsx"],
       "parser": "@typescript-eslint/parser",
       "parserOptions": {
-        "ecmaVersion": 2018,
         "sourceType": "module",
-        "ecmaFeatures": {
-          "jsx": true
-        },
         "warnOnUnsupportedTypeScriptVersion": false
       },
       "plugins": ["@typescript-eslint"],
       "rules": {
-        // Already handled by TS
-        "no-dupe-class-members": "off",
-        "no-undef": "off",
+        // Todo: investigate, for each of these rules, whether we want them.
+        "@typescript-eslint/array-type": "off",
+        "@typescript-eslint/ban-ts-comment": "off",
+        "@typescript-eslint/ban-tslint-comment": "off",
+        "@typescript-eslint/ban-types": "off",
+        "@typescript-eslint/class-literal-property-style": "off",
+        "@typescript-eslint/consistent-generic-constructors": "off",
+        "@typescript-eslint/consistent-indexed-object-style": "off",
+        "@typescript-eslint/consistent-type-definitions": "off",
+        "@typescript-eslint/no-empty-function": "off",
+        "@typescript-eslint/no-namespace": "off",
+        "@typescript-eslint/no-shadow": "off",
+        "@typescript-eslint/no-empty-interface": "off",
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-inferrable-types": "off",
+        "@typescript-eslint/no-var-requires": "off",
+        "@typescript-eslint/prefer-for-of": "off",
+        "@typescript-eslint/prefer-function-type": "off",
+        "@typescript-eslint/no-this-alias": "off",
+        "@typescript-eslint/triple-slash-reference": "off",
+        "no-var": "off",
+        "prefer-const": "off",
+        "prefer-rest-params": "off",
+        "prefer-spread": "off",
 
-        // Add TypeScript specific rules (and turn off ESLint equivalents)
-        "@typescript-eslint/consistent-type-assertions": "warn",
-        "no-array-constructor": "off",
-        "@typescript-eslint/no-array-constructor": "warn",
-        "@typescript-eslint/no-namespace": "error",
-        "no-use-before-define": "off",
-        "@typescript-eslint/no-use-before-define": [
-          "warn",
+        // These off- or differently-configured rules work well for us.
+        "no-unused-expressions": "off",
+        "@typescript-eslint/no-unused-expressions": [
+          "error",
           {
-            "functions": false,
-            "classes": false,
-            "variables": false,
-            "typedefs": false
+            "allowShortCircuit": true,
+            "allowTernary": true,
+            "allowTaggedTemplates": true
           }
         ],
         "no-unused-vars": "off",
@@ -81,17 +98,27 @@
             "ignoreRestSiblings": true
           }
         ],
-        "no-unused-expressions": "off",
-        "@typescript-eslint/no-unused-expressions": [
-          "error",
+        "no-use-before-define": "off",
+        "@typescript-eslint/no-use-before-define": [
+          "warn",
           {
-            "allowShortCircuit": true,
-            "allowTernary": true,
-            "allowTaggedTemplates": true
+            "functions": true,
+            "classes": true,
+            "variables": true,
+            "enums": true,
+            "typedefs": true
           }
         ],
         "no-useless-constructor": "off",
-        "@typescript-eslint/no-useless-constructor": "warn"
+        "@typescript-eslint/no-useless-constructor": "warn",
+        "@typescript-eslint/prefer-literal-enum-member": "error"
+      }
+    },
+    {
+      "files": ["packages/**/*.tsx?"],
+      "rules": {
+        "jsdoc/no-types": "error",
+        "jsdoc/no-undefined-types": "error"
       }
     },
     {
@@ -105,6 +132,16 @@
     {
       "files": ["examples/**/*"],
       "rules": {
+        "@typescript-eslint/no-use-before-define": [
+          "error",
+          {
+            "functions": true,
+            "classes": true,
+            "variables": true,
+            "enums": true,
+            "typedefs": true
+          }
+        ],
         "import/no-anonymous-default-export": [
           "error",
           {
@@ -124,6 +161,7 @@
     },
     {
       "files": ["packages/**"],
+      "excludedFiles": ["packages/next/taskfile.js"],
       "rules": {
         "no-shadow": ["warn", { "builtinGlobals": false }],
         "import/no-extraneous-dependencies": [
@@ -135,6 +173,9 @@
     {
       "files": ["packages/**/*.tsx", "packages/**/*.ts"],
       "rules": {
+        // Note: you must disable the base rule as it can report incorrect errors
+        "no-shadow": "off",
+        "@typescript-eslint/no-shadow": ["warn", { "builtinGlobals": false }],
         "@typescript-eslint/no-unused-vars": [
           "warn",
           {
@@ -143,6 +184,30 @@
             "ignoreRestSiblings": true
           }
         ]
+      }
+    },
+    {
+      "files": [
+        "packages/eslint-plugin-next/**/*.js",
+        "test/unit/eslint-plugin-next/**/*.test.ts"
+      ],
+      "extends": ["plugin:eslint-plugin/recommended"],
+      "parserOptions": {
+        "sourceType": "script"
+      },
+      "rules": {
+        "eslint-plugin/prefer-replace-text": "error",
+        "eslint-plugin/report-message-format": [
+          "error",
+          ".+\\. See: https://nextjs.org/docs/messages/[a-z\\-]+$"
+        ],
+        "eslint-plugin/require-meta-docs-description": [
+          "error",
+          {
+            "pattern": ".+"
+          }
+        ],
+        "eslint-plugin/require-meta-docs-url": "error"
       }
     }
   ],
@@ -200,9 +265,15 @@
     "no-obj-calls": "warn",
     "no-octal": "warn",
     "no-octal-escape": "warn",
-    "no-redeclare": ["warn", { "builtinGlobals": false }],
     "no-regex-spaces": "warn",
-    "no-restricted-syntax": ["warn", "WithStatement"],
+    "no-restricted-syntax": [
+      "warn",
+      "WithStatement",
+      {
+        "message": "substr() is deprecated, use slice() or substring() instead",
+        "selector": "MemberExpression > Identifier[name='substr']"
+      }
+    ],
     "no-script-url": "warn",
     "no-self-assign": "warn",
     "no-self-compare": "warn",
@@ -283,6 +354,12 @@
     "react/react-in-jsx-scope": "error",
     "react/require-render-return": "error",
     "react/style-prop-object": "warn",
-    "react-hooks/rules-of-hooks": "error"
+    "react-hooks/rules-of-hooks": "error",
+    // "@typescript-eslint/non-nullable-type-assertion-style": "warn",
+    "@typescript-eslint/prefer-as-const": "warn",
+    "@typescript-eslint/no-redeclare": [
+      "warn",
+      { "builtinGlobals": false, "ignoreDeclarationMerge": true }
+    ]
   }
 }

@@ -1,18 +1,10 @@
 /* eslint-env jest */
 
-import http from 'http'
 import fs from 'fs-extra'
 import { join } from 'path'
 import cheerio from 'cheerio'
-import { nextServer } from 'next-test-utils'
-import {
-  fetchViaHTTP,
-  findPort,
-  nextBuild,
-  renderViaHTTP,
-} from 'next-test-utils'
-
-jest.setTimeout(1000 * 60 * 2)
+import { nextServer, startApp, waitFor } from 'next-test-utils'
+import { fetchViaHTTP, nextBuild, renderViaHTTP } from 'next-test-utils'
 
 const appDir = join(__dirname, '..')
 let server
@@ -20,7 +12,6 @@ let nextApp
 let appPort
 let buildId
 let requiredFilesManifest
-let errors = []
 
 describe('Required Server Files', () => {
   beforeAll(async () => {
@@ -57,21 +48,10 @@ describe('Required Server Files', () => {
       quiet: false,
       minimalMode: true,
     })
-    appPort = await findPort()
 
-    server = http.createServer(async (req, res) => {
-      try {
-        await nextApp.getRequestHandler()(req, res)
-      } catch (err) {
-        console.error('top-level', err)
-        errors.push(err)
-        res.statusCode = 500
-        res.end('error')
-      }
-    })
-    await new Promise((res, rej) => {
-      server.listen(appPort, (err) => (err ? rej(err) : res()))
-    })
+    server = await startApp(nextApp)
+    appPort = server.address().port
+
     console.log(`Listening at ::${appPort}`)
   })
   afterAll(async () => {
@@ -142,6 +122,7 @@ describe('Required Server Files', () => {
     expect($('#slug').text()).toBe('first')
     expect(data.hello).toBe('world')
 
+    await waitFor(2000)
     const html2 = await renderViaHTTP(appPort, '/fallback/first')
     const $2 = cheerio.load(html2)
     const data2 = JSON.parse($2('#props').text())
@@ -192,11 +173,16 @@ describe('Required Server Files', () => {
   })
 
   it('should render dynamic SSR page correctly with x-matched-path', async () => {
-    const html = await renderViaHTTP(appPort, '/some-other-path', undefined, {
-      headers: {
-        'x-matched-path': '/dynamic/[slug]?slug=first',
-      },
-    })
+    const html = await renderViaHTTP(
+      appPort,
+      '/some-other-path?nxtPslug=first',
+      undefined,
+      {
+        headers: {
+          'x-matched-path': '/dynamic/[slug]',
+        },
+      }
+    )
     const $ = cheerio.load(html)
     const data = JSON.parse($('#props').text())
 
@@ -204,11 +190,16 @@ describe('Required Server Files', () => {
     expect($('#slug').text()).toBe('first')
     expect(data.hello).toBe('world')
 
-    const html2 = await renderViaHTTP(appPort, '/some-other-path', undefined, {
-      headers: {
-        'x-matched-path': '/dynamic/[slug]?slug=second',
-      },
-    })
+    const html2 = await renderViaHTTP(
+      appPort,
+      '/some-other-path?slug=second',
+      undefined,
+      {
+        headers: {
+          'x-matched-path': '/dynamic/[slug]',
+        },
+      }
+    )
     const $2 = cheerio.load(html2)
     const data2 = JSON.parse($2('#props').text())
 
@@ -250,11 +241,11 @@ describe('Required Server Files', () => {
   it('should return data correctly with x-matched-path', async () => {
     const res = await fetchViaHTTP(
       appPort,
-      `/_next/data/${buildId}/dynamic/first.json`,
+      `/_next/data/${buildId}/dynamic/first.json?nxtPslug=first`,
       undefined,
       {
         headers: {
-          'x-matched-path': '/dynamic/[slug]?slug=first',
+          'x-matched-path': '/dynamic/[slug]',
         },
       }
     )
@@ -430,30 +421,21 @@ describe('Required Server Files', () => {
   })
 
   it('should bubble error correctly for gip page', async () => {
-    errors = []
     const res = await fetchViaHTTP(appPort, '/errors/gip', { crash: '1' })
     expect(res.status).toBe(500)
-    expect(await res.text()).toBe('error')
-    expect(errors.length).toBe(1)
-    expect(errors[0].message).toContain('gip hit an oops')
+    expect(await res.text()).toBe('Internal Server Error')
   })
 
   it('should bubble error correctly for gssp page', async () => {
-    errors = []
     const res = await fetchViaHTTP(appPort, '/errors/gssp', { crash: '1' })
     expect(res.status).toBe(500)
-    expect(await res.text()).toBe('error')
-    expect(errors.length).toBe(1)
-    expect(errors[0].message).toContain('gssp hit an oops')
+    expect(await res.text()).toBe('Internal Server Error')
   })
 
   it('should bubble error correctly for gsp page', async () => {
-    errors = []
     const res = await fetchViaHTTP(appPort, '/errors/gsp/crash')
     expect(res.status).toBe(500)
-    expect(await res.text()).toBe('error')
-    expect(errors.length).toBe(1)
-    expect(errors[0].message).toContain('gsp hit an oops')
+    expect(await res.text()).toBe('Internal Server Error')
   })
 
   it('should normalize optional values correctly for SSP page', async () => {
@@ -523,8 +505,8 @@ describe('Required Server Files', () => {
     expect($('#index').text()).toBe('index page')
   })
 
-  it('should match the root dyanmic page correctly', async () => {
-    const res = await fetchViaHTTP(appPort, '/index', undefined, {
+  it('should match the root dynamic page correctly', async () => {
+    const res = await fetchViaHTTP(appPort, '/slug-1', undefined, {
       headers: {
         'x-matched-path': '/[slug]',
       },

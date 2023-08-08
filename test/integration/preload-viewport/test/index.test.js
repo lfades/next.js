@@ -1,53 +1,147 @@
 /* eslint-env jest */
 
 import {
-  nextServer,
-  runNextCommand,
-  startApp,
-  stopApp,
+  check,
+  findPort,
+  killApp,
+  nextBuild,
+  nextStart,
   waitFor,
 } from 'next-test-utils'
+import http from 'http'
+import httpProxy from 'http-proxy'
 import webdriver from 'next-webdriver'
 import { join } from 'path'
 import { readFile } from 'fs-extra'
 
-jest.setTimeout(1000 * 60 * 5)
-
 const appDir = join(__dirname, '../')
-let appPort
-let server
 let app
+let appPort
+let stallJs
+let proxyServer
+let nextDataRequests = []
 
 describe('Prefetching Links in viewport', () => {
   beforeAll(async () => {
-    await runNextCommand(['build', appDir])
+    await nextBuild(appDir)
+    const port = await findPort()
+    app = await nextStart(appDir, port)
+    appPort = await findPort()
 
-    app = nextServer({
-      dir: join(__dirname, '../'),
-      dev: false,
-      quiet: true,
+    const proxy = httpProxy.createProxyServer({
+      target: `http://localhost:${port}`,
     })
 
-    server = await startApp(app)
-    appPort = server.address().port
+    proxyServer = http.createServer(async (req, res) => {
+      if (stallJs && req.url.includes('chunks/pages/another')) {
+        console.log('stalling request for', req.url)
+        await new Promise((resolve) => setTimeout(resolve, 5 * 1000))
+      }
+      if (req.url.startsWith('/_next/data')) {
+        nextDataRequests.push(req.url)
+      }
+      proxy.web(req, res)
+    })
+
+    proxy.on('error', (err) => {
+      console.warn('Failed to proxy', err)
+    })
+
+    await new Promise((resolve) => {
+      proxyServer.listen(appPort, () => resolve())
+    })
   })
-  afterAll(() => stopApp(server))
+  afterAll(async () => {
+    await killApp(app)
+    proxyServer.close()
+  })
+
+  it('should de-dupe inflight SSG requests', async () => {
+    nextDataRequests = []
+    const browser = await webdriver(appPort, '/')
+    await browser.eval(function navigate() {
+      window.next.router.push('/ssg/slow')
+      window.next.router.push('/ssg/slow')
+      window.next.router.push('/ssg/slow')
+    })
+    await browser.waitForElementByCss('#content')
+    expect(
+      nextDataRequests.filter((reqUrl) => reqUrl.includes('/ssg/slow.json'))
+        .length
+    ).toBe(2)
+  })
+
+  it('should handle timed out prefetch correctly', async () => {
+    try {
+      stallJs = true
+      const browser = await webdriver(appPort, '/')
+
+      await browser.elementByCss('#scroll-to-another').click()
+      // wait for preload to timeout
+      await waitFor(6 * 1000)
+
+      await browser
+        .elementByCss('#link-another')
+        .click()
+        .waitForElementByCss('#another')
+
+      expect(await browser.elementByCss('#another').text()).toBe('Hello world')
+    } finally {
+      stallJs = false
+    }
+  })
 
   it('should prefetch with link in viewport onload', async () => {
     let browser
     try {
       browser = await webdriver(appPort, '/')
-      const links = await browser.elementsByCss('link[rel=prefetch]')
-      let found = false
 
-      for (const link of links) {
-        const href = await link.getAttribute('href')
-        if (href.includes('first')) {
-          found = true
-          break
+      await check(async () => {
+        const links = await browser.elementsByCss('link[rel=prefetch]')
+        let found = false
+
+        for (const link of links) {
+          const href = await link.getAttribute('href')
+          if (href.includes('first')) {
+            found = true
+            break
+          }
         }
-      }
-      expect(found).toBe(true)
+        expect(found).toBe(true)
+        return 'success'
+      }, 'success')
+    } finally {
+      if (browser) await browser.close()
+    }
+  })
+
+  it('should prefetch with non-bot UA', async () => {
+    let browser
+    try {
+      browser = await webdriver(
+        appPort,
+        `/bot-user-agent?useragent=${encodeURIComponent(
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36'
+        )}`
+      )
+      const links = await browser.elementsByCss('link[rel=prefetch]')
+      expect(links).toHaveLength(1)
+    } finally {
+      if (browser) await browser.close()
+    }
+  })
+
+  it('should not prefetch with bot UA', async () => {
+    let browser
+    try {
+      browser = await webdriver(
+        appPort,
+        `/bot-user-agent?useragent=${encodeURIComponent(
+          'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/W.X.Y.Z Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+        )}`
+      )
+      const links = await browser.elementsByCss('link[rel=prefetch]')
+      expect(links).toHaveLength(0)
     } finally {
       if (browser) await browser.close()
     }
@@ -57,17 +151,21 @@ describe('Prefetching Links in viewport', () => {
     let browser
     try {
       browser = await webdriver(appPort, '/rewrite-prefetch')
-      const links = await browser.elementsByCss('link[rel=prefetch]')
-      let found = false
 
-      for (const link of links) {
-        const href = await link.getAttribute('href')
-        if (href.includes('%5Bslug%5D')) {
-          found = true
-          break
+      await check(async () => {
+        const links = await browser.elementsByCss('link[rel=prefetch]')
+        let found = false
+
+        for (const link of links) {
+          const href = await link.getAttribute('href')
+          if (href.includes('%5Bslug%5D')) {
+            found = true
+            break
+          }
         }
-      }
-      expect(found).toBe(true)
+        expect(found).toBe(true)
+        return 'success'
+      }, 'success')
 
       const hrefs = await browser.eval(`Object.keys(window.next.router.sdc)`)
       expect(hrefs.map((href) => new URL(href).pathname)).toEqual([
@@ -280,6 +378,7 @@ describe('Prefetching Links in viewport', () => {
 
     expect(await browser.eval('window.hadUnhandledReject')).toBeFalsy()
 
+    await browser.waitForElementByCss('#invalid-link')
     await browser.elementByCss('#invalid-link').moveTo()
     expect(await browser.eval('window.hadUnhandledReject')).toBeFalsy()
   })
@@ -298,6 +397,30 @@ describe('Prefetching Links in viewport', () => {
       }
     }
     expect(found).toBe(false)
+  })
+
+  it('should not prefetch already loaded scripts', async () => {
+    const browser = await webdriver(appPort, '/')
+
+    const scriptSrcs = await browser.eval(`(function() {
+      return Array.from(document.querySelectorAll('script'))
+        .map(function(el) {
+          return el.src && new URL(el.src).pathname
+        }).filter(Boolean)
+    })()`)
+
+    await browser.eval('next.router.prefetch("/")')
+
+    const linkHrefs = await browser.eval(`(function() {
+      return Array.from(document.querySelectorAll('link'))
+        .map(function(el) {
+          return el.href && new URL(el.href).pathname
+        }).filter(Boolean)
+    })()`)
+
+    console.log({ linkHrefs, scriptSrcs })
+    expect(scriptSrcs.some((src) => src.includes('pages/index-'))).toBe(true)
+    expect(linkHrefs.some((href) => href.includes('pages/index-'))).toBe(false)
   })
 
   it('should not duplicate prefetches', async () => {
@@ -319,18 +442,38 @@ describe('Prefetching Links in viewport', () => {
     expect(hrefs.some((e) => e.includes(`%5Bhello%5D-`))).toBe(true)
   })
 
-  it('should not add an another observer for a prefetched page', async () => {
+  it('should not re-prefetch for an already prefetched page', async () => {
     // info: both `/` and `/de-duped` ref the `/first` page, which we don't
     // want to be re-fetched/re-observed.
     const browser = await webdriver(appPort, '/')
+
+    await check(async () => {
+      const links = await browser.elementsByCss('link[rel=prefetch]')
+      let found = false
+
+      for (const link of links) {
+        const href = await link.getAttribute('href')
+        if (href.includes('first')) {
+          found = true
+          break
+        }
+      }
+      expect(found).toBe(true)
+      return 'success'
+    }, 'success')
+
     await browser.eval(`(function() {
       window.calledPrefetch = false
       window.next.router.prefetch = function() {
         window.calledPrefetch = true
+        return Promise.resolve()
       }
       window.next.router.push('/de-duped')
     })()`)
-    await waitFor(2 * 1000)
+    await check(
+      () => browser.eval('document.documentElement.innerHTML'),
+      /to \/first/
+    )
     const calledPrefetch = await browser.eval(`window.calledPrefetch`)
     expect(calledPrefetch).toBe(false)
   })
@@ -343,6 +486,7 @@ describe('Prefetching Links in viewport', () => {
       window.calledPrefetch = false
       window.next.router.prefetch = function() {
         window.calledPrefetch = true
+        return Promise.resolve()
       }
       window.next.router.push('/not-de-duped')
     })()`)
@@ -367,6 +511,7 @@ describe('Prefetching Links in viewport', () => {
         "/ssg/catch-all/[...slug]",
         "/ssg/dynamic-nested/[slug1]/[slug2]",
         "/ssg/dynamic/[slug]",
+        "/ssg/slow",
       ]
     `)
   })

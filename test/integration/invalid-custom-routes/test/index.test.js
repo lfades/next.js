@@ -4,8 +4,6 @@ import fs from 'fs-extra'
 import { join } from 'path'
 import { launchApp, findPort, nextBuild } from 'next-test-utils'
 
-jest.setTimeout(1000 * 60 * 2)
-
 let appDir = join(__dirname, '..')
 const nextConfigPath = join(appDir, 'next.config.js')
 
@@ -25,6 +23,23 @@ const writeConfig = async (routes, type = 'redirects') => {
 let getStderr
 
 const runTests = () => {
+  it('should error when empty headers array is present on header item', async () => {
+    await writeConfig(
+      [
+        {
+          source: `/:path*`,
+          headers: [],
+        },
+      ],
+      'headers'
+    )
+    const stderr = await getStderr()
+
+    expect(stderr).toContain(
+      '`headers` field cannot be empty for route {"source":"/:path*"'
+    )
+  })
+
   it('should error when source and destination length is exceeded', async () => {
     await writeConfig(
       [
@@ -129,10 +144,6 @@ const runTests = () => {
     )
 
     expect(stderr).toContain(
-      `\`destination\` is missing for route {"source":"/hello","permanent":false}`
-    )
-
-    expect(stderr).toContain(
       `\`source\` is not a string for route {"source":123,"destination":"/another","permanent":false}`
     )
 
@@ -142,14 +153,6 @@ const runTests = () => {
 
     expect(stderr).toContain(
       `\`statusCode\` is not undefined or valid statusCode for route {"source":"/hello","destination":"/another","statusCode":404}`
-    )
-
-    expect(stderr).toContain(
-      `\`permanent\` is not set to \`true\` or \`false\` for route {"source":"/hello","destination":"/another","permanent":"yes"}`
-    )
-
-    expect(stderr).toContain(
-      `\`permanent\` is not set to \`true\` or \`false\` for route {"source":"/hello","destination":"/another","permanent":"yes"}`
     )
 
     expect(stderr).toContain(

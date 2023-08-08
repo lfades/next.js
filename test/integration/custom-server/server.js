@@ -1,17 +1,42 @@
-const http = require('http')
+if (process.env.POLYFILL_FETCH) {
+  global.fetch = require('node-fetch').default
+  global.Request = require('node-fetch').Request
+  global.Headers = require('node-fetch').Headers
+}
+
+const { readFileSync } = require('fs')
 const next = require('next')
+const { join } = require('path')
+const { parse } = require('url')
 
 const dev = process.env.NODE_ENV !== 'production'
 const dir = __dirname
 const port = process.env.PORT || 3000
+const { createServer } = require(process.env.USE_HTTPS === 'true'
+  ? 'https'
+  : 'http')
 
-const app = next({ dev, dir })
+const app = next({ dev, hostname: 'localhost', port, dir })
 const handleNextRequests = app.getRequestHandler()
 
+const httpOptions = {
+  key: readFileSync(join(__dirname, 'ssh/localhost-key.pem')),
+  cert: readFileSync(join(__dirname, 'ssh/localhost.pem')),
+}
+
+process.on('unhandledRejection', (err) => {
+  console.error('- error unhandledRejection:', err)
+})
+
 app.prepare().then(() => {
-  const server = new http.Server(async (req, res) => {
+  const server = createServer(httpOptions, async (req, res) => {
     if (req.url === '/no-query') {
       return app.render(req, res, '/no-query')
+    }
+
+    if (req.url === '/unhandled-rejection') {
+      Promise.reject(new Error('unhandled rejection'))
+      return res.end('ok')
     }
 
     if (/setAssetPrefix/.test(req.url)) {
@@ -42,6 +67,10 @@ app.prepare().then(() => {
       } catch (err) {
         res.end(err.message)
       }
+    }
+
+    if (/custom-url-with-request-handler/.test(req.url)) {
+      return handleNextRequests(req, res, parse('/dashboard', true))
     }
 
     handleNextRequests(req, res)

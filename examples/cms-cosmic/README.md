@@ -10,7 +10,7 @@ This example showcases Next.js's [Static Generation](https://nextjs.org/docs/bas
 
 Once you have access to [the environment variables you'll need](#step-3-set-up-environment-variables), deploy the example using [Vercel](https://vercel.com?utm_source=github&utm_medium=readme&utm_campaign=next-example):
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/git/external?repository-url=https://github.com/vercel/next.js/tree/canary/examples/cms-cosmic&project-name=cms-cosmic&repository-name=cms-cosmic&env=COSMIC_BUCKET_SLUG,COSMIC_READ_KEY,COSMIC_PREVIEW_SECRET&envDescription=Required%20to%20connect%20the%20app%20with%20Cosmic&envLink=https://vercel.link/cms-cosmic-env)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/vercel/next.js/tree/canary/examples/cms-cosmic&project-name=cms-cosmic&repository-name=cms-cosmic&env=COSMIC_BUCKET_SLUG,COSMIC_READ_KEY,COSMIC_PREVIEW_SECRET&envDescription=Required%20to%20connect%20the%20app%20with%20Cosmic&envLink=https://vercel.link/cms-cosmic-env)
 
 ### Related examples
 
@@ -27,16 +27,26 @@ Once you have access to [the environment variables you'll need](#step-3-set-up-e
 - [GraphCMS](/examples/cms-graphcms)
 - [Kontent](/examples/cms-kontent)
 - [Ghost](/examples/cms-ghost)
+- [Umbraco Heartcore](/examples/cms-umbraco-heartcore)
 - [Blog Starter](/examples/blog-starter)
+- [Builder.io](/examples/cms-builder-io)
+- [DotCMS](/examples/cms-dotcms)
+- [Enterspeed](/examples/cms-enterspeed)
 
 ## How to use
 
-Execute [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app) with [npm](https://docs.npmjs.com/cli/init) or [Yarn](https://yarnpkg.com/lang/en/docs/cli/create/) to bootstrap the example:
+Execute [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app) with [npm](https://docs.npmjs.com/cli/init), [Yarn](https://yarnpkg.com/lang/en/docs/cli/create/), or [pnpm](https://pnpm.io) to bootstrap the example:
 
 ```bash
 npx create-next-app --example cms-cosmic cms-cosmic-app
-# or
+```
+
+```bash
 yarn create next-app --example cms-cosmic cms-cosmic-app
+```
+
+```bash
+pnpm create next-app --example cms-cosmic cms-cosmic-app
 ```
 
 ## Configuration
@@ -61,7 +71,7 @@ cp .env.local.example .env.local
 
 Then set each variable on `.env.local`:
 
-- `COSMIC_BUCKET_SLUG` should be the **Bucket slug** key under **Basic Settings**.
+- `COSMIC_BUCKET_SLUG` should be the **Bucket slug** key under **API Access**.
 - `COSMIC_READ_KEY` should be the **Read Key** under **API Access**.
 - `COSMIC_PREVIEW_SECRET` can be any random string (but avoid spaces) - this is used for [Preview Mode](https://nextjs.org/docs/advanced-features/preview-mode).
 
@@ -129,4 +139,4 @@ To deploy your local project to Vercel, push it to GitHub/GitLab/Bitbucket and [
 
 Alternatively, you can deploy using our template by clicking on the Deploy button below.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/git/external?repository-url=https://github.com/vercel/next.js/tree/canary/examples/cms-cosmic&project-name=cms-cosmic&repository-name=cms-cosmic&env=COSMIC_BUCKET_SLUG,COSMIC_READ_KEY,COSMIC_PREVIEW_SECRET&envDescription=Required%20to%20connect%20the%20app%20with%20Cosmic&envLink=https://vercel.link/cms-cosmic-env)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/vercel/next.js/tree/canary/examples/cms-cosmic&project-name=cms-cosmic&repository-name=cms-cosmic&env=COSMIC_BUCKET_SLUG,COSMIC_READ_KEY,COSMIC_PREVIEW_SECRET&envDescription=Required%20to%20connect%20the%20app%20with%20Cosmic&envLink=https://vercel.link/cms-cosmic-env)
