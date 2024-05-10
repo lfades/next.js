@@ -1,0 +1,5 @@
+{
+  "name": "@vercel/nft",
+  "main": "index.js",
+  "license": "MIT"
+}

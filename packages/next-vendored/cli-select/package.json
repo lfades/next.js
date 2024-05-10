@@ -1,0 +1,6 @@
+{
+  "name": "cli-select",
+  "main": "index.js",
+  "author": "Cyril Wanner <info@cyr.li>",
+  "license": "MIT"
+}
